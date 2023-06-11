@@ -332,8 +332,10 @@ def search_bus_info(number):
     
     return sorted(bus_info_list, key=search_score)
 
-def get_naver_map(pos, route_size, naver_key_id, naver_key):
+def get_naver_map(left, top, right, bottom, naver_key_id, naver_key):
+    route_size = ((right - left), (bottom - top))
     route_size_max = max(route_size[0], route_size[1])
+    pos = ((left + right) / 2, (top + bottom) / 2)
     level = 12
     
     while 2 ** (21 - level) > route_size_max and level < 14:
@@ -356,7 +358,7 @@ def get_naver_map(pos, route_size, naver_key_id, naver_key):
     for p in map_part:
         gps_pos = convert_gps((pos[0] + k * p[0], pos[1] + k * p[1]))
         map_img.append(requests.get('https://naveropenapi.apigw.ntruss.com/map-static/v2/raster?w=1024&h=1024&center={},{}&level={}&format=png&scale=2'.format(gps_pos[0], gps_pos[1], level), 
-            headers={'X-NCP-APIGW-API-KEY-ID': naver_api_key_id, 'X-NCP-APIGW-API-KEY': naver_api_key}).content)
+            headers={'X-NCP-APIGW-API-KEY-ID': naver_key_id, 'X-NCP-APIGW-API-KEY': naver_key}).content)
     
     result = ''
     
@@ -366,7 +368,12 @@ def get_naver_map(pos, route_size, naver_key_id, naver_key):
     return result
 
 def get_mapbox_map(left, top, right, bottom, mapbox_key):
+    route_size_max = max(right - left, bottom - top)
     level = 12
+    
+    while 2 ** (21 - level) > route_size_max and level < 14:
+        level += 1
+    
     tile_size = 2 ** (21 - level)
     
     gps_pos = convert_gps((left, top))
@@ -924,8 +931,8 @@ def main():
             
             if mapbox_key:
                 f.write(get_mapbox_map(mapframe_left, mapframe_top, mapframe_right, mapframe_bottom, mapbox_key))
-            elif naver_api_key and naver_api_key_id:
-                f.write(get_naver_map(mapframe_center, mapframe_size))
+            elif naver_key_id and naver_key:
+                f.write(get_naver_map(mapframe_left, mapframe_top, mapframe_right, mapframe_bottom, naver_key_id, naver_key))
             else:
                 print('배경 지도를 사용하려면 API 키를 입력해야 합니다.')
         
