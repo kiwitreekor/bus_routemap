@@ -1,6 +1,6 @@
 import xml.etree.ElementTree as elemtree
 from datetime import datetime
-import requests, time, sys, os, re, math, json, base64
+import requests, time, sys, os, re, math, json, base64, argparse
 import mapbox
 
 route_type_str = {0: '공용', 1: '공항', 2: '마을', 3: '간선', 4: '지선', 5: '순환', 6: '광역', 7: '인천', 8: '경기', 9: '폐지', 10: '투어',
@@ -367,7 +367,7 @@ def get_naver_map(left, top, right, bottom, naver_key_id, naver_key):
     
     return result
 
-def get_mapbox_map(left, top, right, bottom, mapbox_key):
+def get_mapbox_map(left, top, right, bottom, mapbox_key, mapbox_style):
     route_size_max = max(right - left, bottom - top)
     level = 12
     
@@ -392,8 +392,8 @@ def get_mapbox_map(left, top, right, bottom, mapbox_key):
             pos_x = pos_x1 + (x - tile_x1) * tile_size
             pos_y = pos_y1 + (y - tile_y1) * tile_size
             
-            result += '<g id="tile{}-{}" transform="translate({}, {}) scale(0.125, 0.125) ">\n'.format(x, y, pos_x, pos_y)
-            result += mapbox.load_tile('kiwitree/clinp1vgh002t01q4c2366q3o', mapbox_key, x, y, level, draw_full_svg = False, clip_mask = True)
+            result += '<g id="tile{0}-{1}" transform="translate({2}, {3}) scale({4}, {4}) ">\n'.format(x, y, pos_x, pos_y, tile_size / 4096)
+            result += mapbox.load_tile(mapbox_style, mapbox_key, x, y, level, draw_full_svg = False, clip_mask = True)
             result += '</g>\n'
         
     result += '</g>\n'
@@ -401,6 +401,10 @@ def get_mapbox_map(left, top, right, bottom, mapbox_key):
     return result
 
 def main():
+    parser = argparse.ArgumentParser(prog='bus_routemap')
+    parser.add_argument('search_query')
+    parser.add_argument('--style', choices=['light', 'dark'], default='light', required=False)
+    
     try:
         with open('key.json', mode='r', encoding='utf-8') as key_file:
             global key, naver_key_id, naver_key
@@ -419,10 +423,17 @@ def main():
         print('경기도 API: https://www.data.go.kr/data/15080662/openapi.do')
         return
     
-    if len(sys.argv) <= 1:
+    args = parser.parse_args()
+    
+    if not args.search_query:
         query = input('검색어: ')
-    else:    
-        query = sys.argv[1]
+    else:
+        query = args.search_query
+    
+    if args.style == 'light':
+        mapbox_style = 'kiwitree/clinp1vgh002t01q4c2366q3o'
+    elif args.style == 'dark':
+        mapbox_style = 'kiwitree/clirdaqpr00hu01pu8t7vhmq7'
     
     bus_info_list = search_bus_info(query)
     bus_index = None
@@ -554,6 +565,11 @@ def main():
         line_color = '#3d5bab'
         line_dark_color = '#263c77'
     
+    if args.style == 'light':
+        page_color = '#ffffff'
+    elif args.style == 'dark':
+        page_color = '#282828'
+    
     fill_color = '#ffffff'
     if route_info['name'][0] == 'N':
         fill_color = '#ffcc00'
@@ -583,6 +599,11 @@ def main():
     style_circle_dark = "stroke:{};".format(line_dark_color) + style_circle_base
     
     style_text = "font-size:30px;line-height:1.0;font-family:'KoPubDotum Bold';text-align:start;letter-spacing:0px;word-spacing:0px;fill-opacity:1;"
+    
+    if args.style == 'light':
+        style_fill_circle = "fill:#ffffff;"
+    elif args.style == 'dark':
+        style_fill_circle = "fill:#282828;"
     
     style_fill_white = "fill:#ffffff;"
     style_fill_gray = "fill:#cccccc;"
@@ -701,7 +722,7 @@ def main():
         return collision
     
     def draw_bus_stop(stop, type = 0):
-        stop_circle_style = ((style_fill_gray if stop['pass'] else style_fill_white) if route_info['name'][0] != 'N' else style_fill_yellow) + (style_circle if stop['section'] == 0 else style_circle_dark)
+        stop_circle_style = ((style_fill_gray if stop['pass'] else style_fill_circle) if route_info['name'][0] != 'N' else style_fill_yellow) + (style_circle if stop['section'] == 0 else style_circle_dark)
         svg_circle = '<circle style="{}" cx="{}" cy="{}" r="{}" />\n'.format(stop_circle_style, stop['pos'][0], stop['pos'][1], 6 * size_factor)
         
         if stop['section'] == 0:
@@ -923,14 +944,11 @@ def main():
         if draw_full_svg:
             f.write('<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n')
             f.write('<svg width="2230" height="1794" viewBox="0 0 2230 1794" xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"><style></style>\n')
-            f.write('<sodipodi:namedview id="namedview1" pagecolor="#ffffff" bordercolor="#cccccc" borderopacity="1" inkscape:deskcolor="#e5e5e5"/>')
+            f.write('<sodipodi:namedview id="namedview1" pagecolor="{}" bordercolor="#cccccc" borderopacity="1" inkscape:deskcolor="#e5e5e5"/>'.format(page_color))
         
         if draw_background_map:
-            mapframe_center = ((mapframe_left + mapframe_right) / 2, (mapframe_top + mapframe_bottom) / 2)
-            mapframe_size = (mapframe_right - mapframe_left, mapframe_bottom - mapframe_top)
-            
             if mapbox_key:
-                f.write(get_mapbox_map(mapframe_left, mapframe_top, mapframe_right, mapframe_bottom, mapbox_key))
+                f.write(get_mapbox_map(mapframe_left - 10, mapframe_top - 10, mapframe_right + 10, mapframe_bottom + 10, mapbox_key, mapbox_style))
             elif naver_key_id and naver_key:
                 f.write(get_naver_map(mapframe_left, mapframe_top, mapframe_right, mapframe_bottom, naver_key_id, naver_key))
             else:

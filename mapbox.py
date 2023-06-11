@@ -35,12 +35,17 @@ def rgb_to_hex(rgb):
 
 def color_to_rgb(color):
     rx_hsl = re.compile(r'hsl\(\s*(\d+),\s*(\d+)%,\s*(\d+)%\s*\)')
+    rx_hsla = re.compile(r'hsla\(\s*(\d+),\s*(\d+)%,\s*(\d+)%\s*,\s*[0-9.]+\)')
     rx_rgb = re.compile(r'rgb\(\s*(\d+),\s*(\d+),\s*(\d+)\s*\)')
     rx_hex = re.compile(r'#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$')
     
     hsl_match = rx_hsl.match(color)
     if hsl_match:
         return colorsys.hls_to_rgb(int(hsl_match[1])/360, int(hsl_match[3])/100, int(hsl_match[2])/100)
+    
+    hsla_match = rx_hsla.match(color)
+    if hsla_match:
+        return colorsys.hls_to_rgb(int(hsla_match[1])/360, int(hsla_match[3])/100, int(hsla_match[2])/100)
     
     hex_match = rx_hex.match(color)
     if hex_match:
@@ -112,6 +117,9 @@ def get_value(expression, feature):
         op = expression[0]
         values = expression[1:]
         
+        if not isinstance(op, str):
+            return expression
+        
         if op == '!':
             return not get_value(values[0], feature)
         elif op == '==':
@@ -130,6 +138,12 @@ def get_value(expression, feature):
             return get_value(values[0], feature) + get_value(values[1], feature)
         elif op == '-':
             return get_value(values[0], feature) - get_value(values[1], feature)
+        elif op == '*':
+            return get_value(values[0], feature) * get_value(values[1], feature)
+        elif op == '/':
+            return get_value(values[0], feature) / get_value(values[1], feature)
+        elif op == 'sqrt':
+            return math.sqrt(get_value(values[0], feature))
         elif op == 'zoom':
             return properties['zoom']
         elif op == 'all':
@@ -158,6 +172,8 @@ def get_value(expression, feature):
                 return bool(values[0] in feature['properties'])
             else:
                 raise ValueError()
+        elif op == 'literal':
+            return values[0]
         elif op == 'to-number':
             return int(get_value(values[0], feature))
         elif op == 'to-string':
@@ -175,7 +191,13 @@ def get_value(expression, feature):
         elif op == 'case':
             for i in range(0, len(values) - 1, 2):
                 if get_value(values[i], feature):
-                    return get_value(values[i+1])
+                    return get_value(values[i+1], feature)
+            return get_value(values[-1], feature)
+        elif op == 'coalesce':
+            for i in range(0, len(values)):
+                value = get_value(values[i], feature)
+                if value:
+                    return value
             return get_value(values[-1], feature)
         elif op == 'step':
             label = get_value(values[0], feature)
@@ -244,12 +266,16 @@ def draw_geometry(f, feature, style):
             f.write('<polyline points="{}" style="{}" />\n'.format(point_str, style_str))
         f.write('</g>\n')
 
-def draw_symbol(f, feature, layout):
+def draw_symbol(f, feature, layout, paint):
     if feature['geometry']['type'] == 'Point':
         coord = feature['geometry']['coordinates']
+        icon_image = None
         
         if 'icon-image' in layout:
-            sprite = load_sprite(get_value(layout['icon-image'], feature))
+            icon_image = layout['icon-image']
+        
+        if icon_image:
+            sprite = load_sprite(get_value(icon_image, feature))
             size = 1
             
             if 'icon-size' in layout:
@@ -265,7 +291,7 @@ def draw_symbol(f, feature, layout):
         
         if 'text-field' in layout:
             text = get_value(layout['text-field'], feature)
-            text_style = {'fill': '#111111', 'stroke': '#ffffff', 'text-anchor': 'middle', 'font-size': 15, 'text-align': 'center'}
+            text_style = {'fill': '#111111', 'stroke': 'none', 'text-anchor': 'middle', 'font-size': 15, 'text-align': 'center'}
             
             if 'text-font' in layout:
                 text_style['font-family'] = layout['text-font'][0]
@@ -274,18 +300,23 @@ def draw_symbol(f, feature, layout):
                 text_style['font-size'] = get_value(layout['text-size'], feature) * 8
                 text_style['stroke-width'] = text_style['font-size'] / 4
             
+            if 'text-color' in paint:
+                text_style['fill'] = get_color(paint['text-color'], feature)
+                
+            if 'text-halo-color' in paint:
+                text_style['stroke'] = get_color(paint['text-halo-color'], feature)
+            
             x = coord[0]
             y = coord[1]
             
             if 'text-offset' in layout:
-                x += layout['text-offset'][0] * text_style['font-size']
-                y -= layout['text-offset'][1] * text_style['font-size']
+                text_offset = get_value(layout['text-offset'], feature)
+                
+                x += text_offset[0] * text_style['font-size']
+                y -= text_offset[1] * text_style['font-size']
             
-            style_str = ''
-            for key, value in text_style.items():
-                style_str += '{}:{};'.format(key, value)
-            
-            f.write('<text x="0" y="0" transform="translate({}, {}) scale(1, -1)" style="{}">{}</text>\n'.format(x, y, css_style(text_style), text))
+            if text_style['stroke'] != 'none':
+                f.write('<text x="0" y="0" transform="translate({}, {}) scale(1, -1)" style="{}">{}</text>\n'.format(x, y, css_style(text_style), text))
             
             text_style['stroke'] = 'none'
             f.write('<text x="0" y="0" transform="translate({}, {}) scale(1, -1)" style="{}">{}</text>\n'.format(x, y, css_style(text_style), text))
@@ -408,7 +439,7 @@ def load_tile(style_id, token, x, y, zoom, draw_full_svg = True, clip_mask = Tru
                             
                             draw_geometry(f, feature, feature_style)
                         elif layer['type'] == 'symbol':
-                            draw_symbol(f, feature, layer['layout'])
+                            draw_symbol(f, feature, layer['layout'], layer['paint'])
                 
                 f.write('</g>')
         
