@@ -10,6 +10,8 @@ key = ''
 naver_key_id = ''
 naver_key = ''
 
+cache_dir = 'cache'
+
 left_end = (126.79378221, 37.45027492)
 right_end = (127.1765, 37.69423136)
 
@@ -387,15 +389,32 @@ def get_mapbox_map(left, top, right, bottom, mapbox_key, mapbox_style):
     tile_pos = mapbox.num2deg(tile_x1, tile_y1, level)
     pos_x1, pos_y1 = convert_pos((tile_pos[1], tile_pos[0]))
     
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir)
+    
     for x in range(tile_x1, tile_x2 + 1):
         for y in range(tile_y1, tile_y2 + 1):
+            cache_filename = cache_dir + '/tile{}-{}-z{}.svg'.format(x, y, level)
+            if not os.path.exists(cache_filename):
+                with open(cache_filename, mode='w+', encoding='utf-8') as cache_file:
+                    mapbox.load_tile(mapbox_style, mapbox_key, x, y, level, draw_full_svg = True, clip_mask = True, fp = cache_file)
+            
             pos_x = pos_x1 + (x - tile_x1) * tile_size
             pos_y = pos_y1 + (y - tile_y1) * tile_size
             
-            result += '<g id="tile{0}-{1}" transform="translate({2}, {3}) scale({4}, {4}) ">\n'.format(x, y, pos_x, pos_y, tile_size / 4096)
-            result += mapbox.load_tile(mapbox_style, mapbox_key, x, y, level, draw_full_svg = False, clip_mask = True)
-            result += '</g>\n'
-        
+            with open(cache_filename, mode='r', encoding='utf-8') as f:
+                text = f.read()
+                svg_match = re.search(r'<svg\s.*?>(.*)</svg>', text, re.DOTALL)
+                
+                if svg_match:
+                    tile = svg_match[1]
+                
+                    result += '<g id="tile{0}-{1}-z{2}" transform="translate({3}, {4}) scale({5}, {5}) ">\n'.format(x, y, level, pos_x, pos_y, tile_size / 4096)
+                    result += tile
+                    result += '</g>\n'
+                else:
+                    raise ValueError()
+            
     result += '</g>\n'
     
     return result

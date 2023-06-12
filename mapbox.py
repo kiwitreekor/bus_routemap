@@ -340,7 +340,7 @@ def load_sprite(sprite_id):
     else:
         raise ValueError()
 
-def load_tile(style_id, token, x, y, zoom, draw_full_svg = True, clip_mask = True):
+def load_tile(style_id, token, x, y, zoom, draw_full_svg = True, clip_mask = True, fp = None):
     properties['x'] = x
     properties['y'] = y
     properties['zoom'] = zoom
@@ -360,93 +360,98 @@ def load_tile(style_id, token, x, y, zoom, draw_full_svg = True, clip_mask = Tru
 
     tile = mapbox_vector_tile.decode(tile_response.content)
     
-    with io.StringIO() as f:
-        if draw_full_svg:
-            f.write('<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n')
-            f.write('<svg width="4096" height="4096" viewBox="0 0 4096 4096" xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"><style></style>\n')
-            f.write('<sodipodi:namedview id="namedview1" pagecolor="#ffffff" bordercolor="#cccccc" borderopacity="1" inkscape:deskcolor="#e5e5e5"/>')
+    if fp == None:
+        f = io.StringIO()
+    else:
+        f = fp
         
-        if clip_mask:
-            f.write('<defs><clipPath id="map-clip-mask"><rect x="0" y="0" width="4096" height="4096" /></clipPath></defs>\n')
-            f.write('<g id="map" transform="scale(1, -1) translate(0, -4096)" clip-path="url(#map-clip-mask)">')
-        else:
-            f.write('<g id="map" transform="scale(1, -1) translate(0, -4096)">')
-        
-        
-        for layer in styles['layers']:
-            if 'minzoom' in layer:
-                if layer['minzoom'] > properties['zoom']:
-                    continue
-            
-            if layer['type'] == 'background':
-                if 'background-color' in layer['paint']:
-                    fill = get_color(layer['paint']['background-color'])
-                    f.write('<g id="{}"><rect x="0" y="0" width="4096" height="4096" fill="{}" /></g>'.format(layer['id'], fill))
-            else:
-                if not layer['source-layer'] in tile:
-                    continue
-                
-                f.write('<g id="{}">'.format(layer['id']))
-                source_layer = tile[layer['source-layer']]
-                
-                for feature in source_layer['features']:
-                    draw_filter = True
-                    
-                    if 'filter' in layer:
-                        draw_filter = get_value(layer['filter'], feature)
-                    
-                    if draw_filter:
-                        if layer['type'] == 'fill':
-                            feature_style = {'fill': '#000000', 'opacity': 1}
-                            
-                            if 'paint' in layer:
-                                if 'fill-color' in layer['paint']:
-                                    feature_style['fill'] = get_color(layer['paint']['fill-color'], feature)
-                                
-                                if 'opacity' in layer['paint']:
-                                    feature_style['opacity'] = get_value(layer['paint']['opacity'], feature)
-                            
-                            draw_geometry(f, feature, feature_style)
-                        elif layer['type'] == 'line':
-                            feature_style = {'fill': 'none', 'stroke': '#000000', 'stroke-width': 1, 'stroke-opacity': 1}
-                            
-                            if 'paint' in layer:
-                                if 'line-color' in layer['paint']:
-                                    feature_style['stroke'] = get_color(layer['paint']['line-color'], feature)
-                                    
-                                if 'line-width' in layer['paint']:
-                                    feature_style['stroke-width'] = get_value(layer['paint']['line-width'], feature) * 8
-                                
-                                if 'line-opacity' in layer['paint']:
-                                    feature_style['stroke-opacity'] = get_value(layer['paint']['line-opacity'], feature)
-                                
-                                if 'line-dasharray' in layer['paint']:
-                                    if not isinstance(layer['paint']['line-dasharray'], list):
-                                        raise TypeError()
-                                    
-                                    dasharray_str = ''
-                                    for dash in layer['paint']['line-dasharray']:
-                                        dasharray_str += '{} '.format(dash)
-                                        
-                                    feature_style['stroke-dasharray'] = dasharray_str
-                            
-                            if 'layout' in layer:
-                                if 'line-cap' in layer['layout']:
-                                    feature_style['stroke-linecap'] = get_value(layer['layout']['line-cap'], feature)
-                                    
-                                if 'line-join' in layer['layout']:
-                                    feature_style['stroke-linejoin'] = get_value(layer['layout']['line-join'], feature)
-                            
-                            draw_geometry(f, feature, feature_style)
-                        elif layer['type'] == 'symbol':
-                            draw_symbol(f, feature, layer['layout'], layer['paint'])
-                
-                f.write('</g>')
-        
-        f.write('</g>')
-        if draw_full_svg:
-            f.write('</svg>')
-        
-        result = f.getvalue()
+    if draw_full_svg:
+        f.write('<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n')
+        f.write('<svg width="4096" height="4096" viewBox="0 0 4096 4096" xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"><style></style>\n')
+        f.write('<sodipodi:namedview id="namedview1" pagecolor="#ffffff" bordercolor="#cccccc" borderopacity="1" inkscape:deskcolor="#e5e5e5"/>\n')
     
-    return result
+    if clip_mask:
+        f.write('<defs><clipPath id="map-clip-mask"><rect x="0" y="0" width="4112" height="4112" /></clipPath></defs>\n')
+        f.write('<g id="map" transform="scale(1, -1) translate(0, -4096)" clip-path="url(#map-clip-mask)">')
+    else:
+        f.write('<g id="map" transform="scale(1, -1) translate(0, -4096)">')
+    
+    for layer in styles['layers']:
+        if 'minzoom' in layer:
+            if layer['minzoom'] > properties['zoom']:
+                continue
+        
+        if layer['type'] == 'background':
+            if 'background-color' in layer['paint']:
+                fill = get_color(layer['paint']['background-color'])
+                f.write('<g id="{0}"><rect x="0" y="0" width="4096" height="4096" fill="{1}" stroke="{1}" stroke-width="32" /></g>'.format(layer['id'], fill))
+        else:
+            if not layer['source-layer'] in tile:
+                continue
+            
+            f.write('<g id="{}">'.format(layer['id']))
+            source_layer = tile[layer['source-layer']]
+            
+            for feature in source_layer['features']:
+                draw_filter = True
+                
+                if 'filter' in layer:
+                    draw_filter = get_value(layer['filter'], feature)
+                
+                if draw_filter:
+                    if layer['type'] == 'fill':
+                        feature_style = {'fill': '#000000', 'opacity': 1}
+                        
+                        if 'paint' in layer:
+                            if 'fill-color' in layer['paint']:
+                                feature_style['fill'] = get_color(layer['paint']['fill-color'], feature)
+                            
+                            if 'opacity' in layer['paint']:
+                                feature_style['opacity'] = get_value(layer['paint']['opacity'], feature)
+                        
+                        draw_geometry(f, feature, feature_style)
+                    elif layer['type'] == 'line':
+                        feature_style = {'fill': 'none', 'stroke': '#000000', 'stroke-width': 1, 'stroke-opacity': 1}
+                        
+                        if 'paint' in layer:
+                            if 'line-color' in layer['paint']:
+                                feature_style['stroke'] = get_color(layer['paint']['line-color'], feature)
+                                
+                            if 'line-width' in layer['paint']:
+                                feature_style['stroke-width'] = get_value(layer['paint']['line-width'], feature) * 8
+                            
+                            if 'line-opacity' in layer['paint']:
+                                feature_style['stroke-opacity'] = get_value(layer['paint']['line-opacity'], feature)
+                            
+                            if 'line-dasharray' in layer['paint']:
+                                if not isinstance(layer['paint']['line-dasharray'], list):
+                                    raise TypeError()
+                                
+                                dasharray_str = ''
+                                for dash in layer['paint']['line-dasharray']:
+                                    dasharray_str += '{} '.format(dash)
+                                    
+                                feature_style['stroke-dasharray'] = dasharray_str
+                        
+                        if 'layout' in layer:
+                            if 'line-cap' in layer['layout']:
+                                feature_style['stroke-linecap'] = get_value(layer['layout']['line-cap'], feature)
+                                
+                            if 'line-join' in layer['layout']:
+                                feature_style['stroke-linejoin'] = get_value(layer['layout']['line-join'], feature)
+                        
+                        draw_geometry(f, feature, feature_style)
+                    elif layer['type'] == 'symbol':
+                        draw_symbol(f, feature, layer['layout'], layer['paint'])
+            
+            f.write('</g>')
+    
+    f.write('</g>')
+        
+    if draw_full_svg:
+        f.write('</svg>')
+    
+    if fp == None:
+        result = f.getvalue()
+        f.close()
+        return result
