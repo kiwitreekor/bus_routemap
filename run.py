@@ -79,6 +79,22 @@ def get_point_segment(points, start, end, dist):
     idx_prev = i
     
     return idx_prev, idx_next
+    
+    
+def get_text_width(text):
+    result = 0
+    
+    for i in text:
+        if re.match(r'[\.\(\)]', i):
+            result += 0.2
+        elif re.match(r'[0-9a-z\-]', i):
+            result += 0.6
+        elif re.match(r'[A-Z]', i):
+            result += 0.8
+        else:
+            result += 1
+    
+    return result
 
 def check_collision(r1, r2):
     if r1[0] < r2[0] + r2[2] and r1[0] + r1[2] > r2[0] and r1[1] < r2[1] + r2[3] and r1[1] + r1[3] > r2[1]:
@@ -94,6 +110,44 @@ def check_collision(r1, r2):
             
         return dx * dy
     return 0
+    
+def get_collision_score(new_rect, rects, points):
+    collision = 0
+    for r in rects:
+        collision += check_collision(r, new_rect)
+    
+    for p in points:
+        collision += check_collision((p[0] - 2, p[1] - 2, 4, 4), new_rect)
+    
+    return collision
+
+def min_distance_from_points(pos, points):
+    min_dist = distance(pos, points[0])
+    for p in points:
+        dist = distance(pos, p)
+        if min_dist > dist:
+            min_dist = dist
+    
+    return min_dist
+    
+def get_bus_stop_name(bus_stop):
+    name_split = bus_stop['name'].split('.')
+    name = bus_stop['name']
+        
+    for n in name_split:
+        # 주요 경유지 처리
+        stn_match = re.search(r'(?:(?:지하철)?[1-9]호선|신분당선|공항철도)?(.+역)(?:[1-9]호선|환승센터)?(?:[0-9]+번(출구|승강장))?$', n)
+        center_match = re.search(r'(광역환승센터|환승센터|환승센타|고속터미널|잠실종합운동장)$', n)
+        
+        if center_match:
+            return name, True
+        elif stn_match:
+            stn_name = stn_match[1]
+            stn_name = re.sub(r'\(.+\)역', '역', stn_name)
+            
+            return stn_name, True
+            
+    return name, False
 
 def get_seoul_bus_stops(routeid):
     # 서울 버스 정류장 목록 조회
@@ -537,7 +591,7 @@ def main():
         route_size = (route_size[0], route_size[0] / 1.5)
     
     size_factor = route_size[0] / 640 if route_size[0] > 640 else (1 - ((640 - route_size[0]) / 800))
-    min_interval = 40 * size_factor
+    min_interval = 60 * size_factor
     
     # 일방통행 여부 묻기
     if distance(points[0], points[-1]) > 50:
@@ -597,21 +651,6 @@ def main():
     style_path = "stroke:{};".format(line_color) + style_path_base
     style_path_dark = "stroke:{};".format(line_dark_color) + style_path_base
     
-    def get_text_width(text):
-        result = 0
-        
-        for i in text:
-            if re.match(r'[\.\(\)]', i):
-                result += 0.2
-            elif re.match(r'[0-9a-z\-]', i):
-                result += 0.6
-            elif re.match(r'[A-Z]', i):
-                result += 0.8
-            else:
-                result += 1
-        
-        return result
-    
     style_circle_base = "opacity:1;fill-opacity:1;stroke-width:{};stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;paint-order:normal".format(3.2 * size_factor)
     
     style_circle = "stroke:{};".format(line_color) + style_circle_base
@@ -632,11 +671,10 @@ def main():
     
     svg = ''
     
-    t_idx = None
+    trans_id = None
     
     # 버스 정류장 렌더링
-    subway_name_list = []
-    subway_index_list = []
+    bus_stop_name_list = []
     
     main_stop_list = []
     minor_stop_list = []
@@ -649,96 +687,70 @@ def main():
         if match:
             bus_stops[i]['name'] = bus_stops[i]['name'][:match.start(0)]
     
-    # 정류장 처리
+    # 기종점 처리
     for i in range(len(bus_stops)):
-        pos = convert_pos(bus_stops[i]['pos'])
-        is_trans = False
-        
-        name_split = bus_stops[i]['name'].split('.')
-        name = bus_stops[i]['name']
-        
-        is_main = False
-        
-        for n in name_split:
-            # 주요 경유지 처리
-            stn_match = re.search(r'(?:(?:지하철)?[1-9]호선|신분당선|공항철도)?(.+역)(?:[1-9]호선|환승센터)?(?:[0-9]+번(출구|승강장))?$', n)
-            center_match = re.search(r'(광역환승센터|환승센터|환승센타|고속터미널|잠실종합운동장)$', n)
-            
-            if center_match:
-                is_main = True
-            elif stn_match:
-                stn_name = stn_match[1]
-                stn_name = re.sub(r'\(.+\)역', '역', stn_name)
-                
-                if stn_name not in subway_name_list:
-                    name = stn_name
-                    is_main = True
-                
-            if is_main:
-                break
-        
-        if not is_one_way:
-            if bus_stops[i]['is_trans']:
-                is_trans = True
+        if is_one_way:
+            is_trans = i == len(bus_stops) - 1
         else:
-            if i == len(bus_stops) - 1:
-                is_trans = True
-                
+            is_trans = bool(bus_stops[i]['is_trans'])
+        
         if i == 0 or is_trans:
-            is_main = True
+            name, is_main = get_bus_stop_name(bus_stops[i])
+            bus_stop_name_list.append(name)
             
-        if is_main:
-            subway_name_list.append(name)
-            subway_index_list.append(i)
-            
+            pos = convert_pos(bus_stops[i]['pos'])
             pass_stop = bool(rx_pass_stop.search(bus_stops[i]['name']))
             
             main_stop_list.append({'ord': i, 'pos': pos, 'name': name, 'section': 0, 'pass': pass_stop})
         
         if is_trans:
-            t_idx = i
+            trans_id = i
             break
             
-    # 회차지점으로부터 가장 가까운 정점 찾기
-    t_point = find_nearest_point(convert_pos(bus_stops[t_idx]['pos']), points)
+    t_point = find_nearest_point(convert_pos(bus_stops[trans_id]['pos']), points)
     
+    # 주요 정류장 처리
     for i in range(len(bus_stops)):
-        if i in subway_index_list:
+        name, is_main = get_bus_stop_name(bus_stops[i])
+        if not is_main or name in bus_stop_name_list:
             continue
         
-        stop = bus_stops[i]
+        bus_stop_name_list.append(name)
         
-        pos = convert_pos(stop['pos'])
+        pos = convert_pos(bus_stops[i]['pos'])
+        pass_stop = bool(rx_pass_stop.search(bus_stops[i]['name']))
+        section = 1 if i > trans_id else 0
         
-        min_dist = distance(pos, main_stop_list[0]['pos'])
-        for s in main_stop_list + minor_stop_list:
-            dist = distance(pos, s['pos'])
-            if min_dist > dist:
-                min_dist = dist
+        if i > trans_id:
+            min_path_dist = min_distance_from_points(pos, points[:t_point])
+            if min_path_dist < min_interval / 4:
+                section = 0
         
-        min_point_dist = distance(pos, points[0])
-        if i > t_idx:
-            for p in points[:t_point]:
-                dist = distance(pos, p)
-                if min_point_dist > dist:
-                    min_point_dist = dist
-            
-        pass_stop = bool(rx_pass_stop.search(stop['name']))
+        main_stop_list.append({'ord': i, 'pos': pos, 'name': name, 'section': section, 'pass': pass_stop})
         
-        if min_dist > min_interval and min_point_dist > min_interval / 2:
-            minor_stop_list.append({'ord': i, 'pos': pos, 'name': stop['name'], 'section': 1 if i > t_idx else 0, 'pass': pass_stop})
+    main_stop_ids = [x['ord'] for x in main_stop_list]
+    
+    # 비주요 정류장 처리
+    for i in range(len(bus_stops)):
+        if i in main_stop_ids:
+            continue
+        
+        pos = convert_pos(bus_stops[i]['pos'])
+        pass_stop = bool(rx_pass_stop.search(bus_stops[i]['name']))
+        section = 1 if i > trans_id else 0
+        
+        stop_points = [s['pos'] for s in main_stop_list + minor_stop_list]
+        min_dist = min_distance_from_points(pos, stop_points)
+        
+        if i > trans_id:
+            min_path_dist = min_distance_from_points(pos, points[:t_point])
+            if min_path_dist < min_interval / 4:
+                continue
+        
+        if min_dist > min_interval:
+            minor_stop_list.append({'ord': i, 'pos': pos, 'name': bus_stops[i]['name'], 'section': section, 'pass': pass_stop})
     
     text_rects = []
-    
-    def get_collision_score(rect):
-        collision = 0
-        for r in text_rects:
-            collision += check_collision(r, rect)
-        
-        for p in points:
-            collision += check_collision((p[0] - 2, p[1] - 2, 4, 4), rect)
-        
-        return collision
     
     def draw_bus_stop(stop, type = 0):
         stop_circle_style = ((style_fill_gray if stop['pass'] else style_fill_circle) if route_info['name'][0] != 'N' else style_fill_yellow) + (style_circle if stop['section'] == 0 else style_circle_dark)
@@ -794,7 +806,7 @@ def main():
         
         text_pos_list = [text_pos_up, text_pos_down, text_pos_left, text_pos_right]
         text_rect_list = [text_rect_up, text_rect_down, text_rect_left, text_rect_right]
-        collisions = [get_collision_score(x) for x in text_rect_list]
+        collisions = [get_collision_score(x, text_rects, points) for x in text_rect_list]
         min_col = 0
         
         for i in range(1, len(collisions)):
