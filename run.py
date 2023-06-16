@@ -140,7 +140,7 @@ def get_bus_stop_name(bus_stop):
         center_match = re.search(r'(광역환승센터|환승센터|환승센타|고속터미널|잠실종합운동장)$', n)
         
         if center_match:
-            return name, True
+            return n, True
         elif stn_match:
             stn_name = stn_match[1]
             stn_name = re.sub(r'\(.+\)역', '역', stn_name)
