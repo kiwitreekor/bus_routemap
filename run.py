@@ -1,34 +1,35 @@
 import xml.etree.ElementTree as elemtree
 from datetime import datetime
-import requests, time, sys, os, re, math, json, base64, argparse
+import requests, time, sys, os, re, math, json, base64, argparse, urllib
 import mapbox
 
 route_type_str = {0: '공용', 1: '공항', 2: '마을', 3: '간선', 4: '지선', 5: '순환', 6: '광역', 7: '인천', 8: '경기', 9: '폐지', 10: '투어',
     11: '직행', 12: '좌석', 13: '일반', 14: '광역', 15: '따복', 16: '순환', 21: '농어촌직행', 22: '농어촌좌석', 23: '농어촌', 30: '마을', 
-    41: '고속', 42: '시외좌석', 43: '시외일반', 51: '공항리무진', 52: '공항좌석', 53: '공항일반'}
+    41: '고속', 42: '시외좌석', 43: '시외일반', 51: '공항리무진', 52: '공항좌석', 53: '공항일반',
+    61: '일반', 62: '급행', 63: '좌석', 64: '심야', 65: '마을'}
 key = ''
 naver_key_id = ''
 naver_key = ''
 
 cache_dir = 'cache'
 
-left_end = (126.79378221, 37.45027492)
-right_end = (127.1765, 37.69423136)
-
-dx = right_end[0] - left_end[0]
-dy = right_end[1] - left_end[1]
+origin_tile = (3490, 1584)
 
 def convert_pos(pos):
-    x = (pos[0] - left_end[0]) / dx * 2230
-    y = (1 - (pos[1] - left_end[1]) / dy) * 1794
+    lat_rad = math.radians(pos[1])
+    n = 1 << 12
+    x = ((pos[0] + 180.0) / 360.0 * n - origin_tile[0]) * 512
+    y = ((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n - origin_tile[1]) * 512
     
     return (x, y)
 
 def convert_gps(pos):
-    longitude = left_end[0] + pos[0] / 2230 * dx
-    latitude = right_end[1] - pos[1] / 1794 * dy
+    n = 1 << 12
+    lon_deg = (pos[0] / 512 + origin_tile[0]) / n * 360.0 - 180.0
+    lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * (pos[1] / 512 + origin_tile[1]) / n)))
+    lat_deg = math.degrees(lat_rad)
     
-    return (longitude, latitude)
+    return (lon_deg, lat_deg)
 
 def distance(pos1, pos2):
     return math.sqrt((pos2[0] - pos1[0]) ** 2 + (pos2[1] - pos1[1]) ** 2)
@@ -129,6 +130,20 @@ def min_distance_from_points(pos, points):
             min_dist = dist
     
     return min_dist
+
+def convert_busan_bus_type(type_str):
+    if type_str[:2] == '일반':
+        return 61
+    elif type_str[:2] == '급행':
+        return 62
+    elif type_str[:2] == '좌석':
+        return 63
+    elif type_str[:2] == '심야':
+        return 64
+    elif type_str[:2] == '마을':
+        return 65
+    else:
+        return 0
     
 def get_bus_stop_name(bus_stop):
     name_split = bus_stop['name'].split('.')
@@ -156,9 +171,9 @@ def get_seoul_bus_stops(routeid):
     route_api_res = requests.get('http://ws.bus.go.kr/api/rest/busRouteInfo/getStaionByRoute', params = params).text
     route_api_tree = elemtree.fromstring(route_api_res)
 
-    api_err = route_api_tree.find('./msgHeader/headerCd').text
+    api_err = int(route_api_tree.find('./msgHeader/headerCd').text)
 
-    if api_err != '0' and api_err != '4':
+    if api_err != 0 and api_err != 4:
         raise ValueError(route_api_tree.find('./msgHeader/headerMsg').text)
 
     route_api_body = route_api_tree.find('./msgBody')
@@ -183,9 +198,9 @@ def get_gyeonggi_bus_stops(routeid):
     route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteStationList', params = params, timeout = 20).text
     route_api_tree = elemtree.fromstring(route_api_res)
 
-    api_err = route_api_tree.find('./msgHeader/resultCode').text
+    api_err = int(route_api_tree.find('./msgHeader/resultCode').text)
 
-    if api_err != '0' and api_err != '4':
+    if api_err != 0 and api_err != 4:
         raise ValueError(route_api_tree.find('./msgHeader/resultMessage').text)
 
     route_api_body = route_api_tree.find('./msgBody')
@@ -206,6 +221,38 @@ def get_gyeonggi_bus_stops(routeid):
         stop['is_trans'] = i.find('./turnYn').text == 'Y'
         
         bus_stops.append(stop)
+    
+    return bus_stops
+
+def get_busan_bus_stops(route_id, route_bims_id):
+    # 부산 버스 정류장 목록 조회
+    params = {'optBusNum': route_bims_id}
+    
+    route_api_res = requests.get('http://bus.busan.go.kr/busanBIMS/Ajax/busLineList.asp', params = params, timeout = 20).text
+    route_api_tree = elemtree.fromstring(route_api_res)
+
+    bus_stop_items = route_api_tree.findall('./line')
+    
+    bus_stops = []
+    for i in bus_stop_items[2:]:
+        stop = {}
+        
+        stop['arsid'] = i.attrib['text4']
+        stop['name'] = i.attrib['text1']
+        stop['pos'] = (float(i.attrib['text2']), float(i.attrib['text3']))
+        stop['is_trans'] = False
+        
+        bus_stops.append(stop)
+    
+    params2 = {'serviceKey': key, 'lineid': route_id}
+    route_api_res2 = requests.get('https://apis.data.go.kr/6260000/BusanBIMS/busInfoByRouteId', params = params2, timeout = 20).text
+    route_api_tree2 = elemtree.fromstring(route_api_res2)
+    
+    bus_stop_items2 = route_api_tree2.findall('./body/items/item')
+    for i in bus_stop_items2:
+        if i.find('./rpoint').text == '1':
+            bus_stops[int(i.find('./bstopidx').text) - 1]['is_trans'] = True
+            break
     
     return bus_stops
 
@@ -250,6 +297,25 @@ def get_gyeonggi_bus_type(routeid):
     route_info['name'] = route_api_body.find('./routeName').text
     route_info['start'] = route_api_body.find('./startStationName').text
     route_info['end'] = route_api_body.find('./endStationName').text
+    
+    return route_info
+
+def get_busan_bus_type(route_bims_id):
+    # 부산 버스 노선정보 조회
+    params = {'optBusNum': route_bims_id}
+    
+    route_api_res = requests.get('http://bus.busan.go.kr/busanBIMS/Ajax/busLineList.asp', params = params, timeout = 20).text
+    route_api_tree = elemtree.fromstring(route_api_res)
+
+    bus_stop_items = route_api_tree.findall('./line')
+    
+    bus_info_tree = bus_stop_items[0]
+    route_info = {}
+    
+    route_info['type'] = convert_busan_bus_type(bus_info_tree.attrib['text2'])
+    route_info['name'] = bus_info_tree.attrib['text1']
+    route_info['start'] = bus_info_tree.attrib['text3']
+    route_info['end'] = bus_info_tree.attrib['text4']
     
     return route_info
 
@@ -303,16 +369,38 @@ def get_gyeonggi_bus_route(routeid):
     
     return route_positions
 
-def search_bus_info(number):
-    # 서울 버스 조회
+def get_busan_bus_route(route_name):
+    # 부산 버스 노선형상 조회
+    params = {'busLineId': route_name}
+    encoded_params = urllib.parse.urlencode(params, encoding='cp949')
+    
+    route_api_res = requests.get('http://bus.busan.go.kr/busanBIMS/Ajax/busLineCoordList.asp?' + encoded_params, timeout = 20).text
+    route_api_tree = elemtree.fromstring(route_api_res)
+    xml_route_positions = route_api_tree.findall('./coord')
+    
+    if not xml_route_positions:
+        return None, None
+    
+    route_bims_id = xml_route_positions[0].attrib['value1']
+    route_positions = []
+
+    for i in xml_route_positions[1:]:
+        x = float(i.attrib['value2'])
+        y = float(i.attrib['value3'])
+        
+        route_positions.append((x, y))
+    
+    return route_positions, route_bims_id
+
+def search_seoul_bus_info(number):
     params = {'serviceKey': key, 'strSrch': number}
     
     list_api_res = requests.get('http://ws.bus.go.kr/api/rest/busRouteInfo/getBusRouteList', params = params).text
     list_api_tree = elemtree.fromstring(list_api_res)
 
-    api_err = list_api_tree.find('./msgHeader/headerCd').text
+    api_err = int(list_api_tree.find('./msgHeader/headerCd').text)
 
-    if api_err != '0' and api_err != '4':
+    if api_err != 0 and api_err != 4:
         raise ValueError(list_api_tree.find('./msgHeader/headerMsg').text)
 
     list_api_body = list_api_tree.find('./msgBody')
@@ -322,41 +410,97 @@ def search_bus_info(number):
 
     for i in xml_bus_list:
         name = i.find('./busRouteNm').text
-        id = i.find('./busRouteId').text
+        route_id = i.find('./busRouteId').text
         start = i.find('./stStationNm').text
         end = i.find('./edStationNm').text
-        type = int(i.find('./routeType').text)
+        route_type = int(i.find('./routeType').text)
         
-        if type == 7 or type == 8:
+        if route_type == 7 or route_type == 8:
             continue
         
-        bus_info_list.append({'name': name, 'id': id, 'desc': start + '~' + end, 'type': type})
+        bus_info_list.append({'name': name, 'id': route_id, 'desc': start + '~' + end, 'type': route_type})
     
-    # 경기 버스 조회
+    return bus_info_list
+
+def search_gyeonggi_bus_info(number):
+    bus_info_list = []
+    
     try:
         params = {'serviceKey': key, 'keyword': number}
         
         list_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteList', params = params, timeout = 20).text
         list_api_tree = elemtree.fromstring(list_api_res)
         
-        api_err = list_api_tree.find('./msgHeader/resultCode').text
+        api_err = int(list_api_tree.find('./msgHeader/resultCode').text)
         
-        if api_err != '0' and api_err != '4':
+        if api_err != 0 and api_err != 4:
             raise ValueError(list_api_tree.find('./msgHeader/resultMessage').text)
         
-        if api_err != '4':
+        if api_err != 4:
             list_api_body = list_api_tree.find('./msgBody')
             xml_bus_list = list_api_body.findall('./busRouteList')
 
             for i in xml_bus_list:
                 name = i.find('./routeName').text
-                id = i.find('./routeId').text
+                route_id = i.find('./routeId').text
                 region = i.find('./regionName').text
-                type = int(i.find('./routeTypeCd').text)
+                route_type = int(i.find('./routeTypeCd').text)
                 
-                bus_info_list.append({'name': name, 'id': id, 'desc': region, 'type': type})
+                bus_info_list.append({'name': name, 'id': route_id, 'desc': region, 'type': route_type})
     except requests.exceptions.ConnectTimeout:
         print('Request Timeout')
+    
+    return bus_info_list
+
+def search_busan_bus_info(number):
+    bus_info_list = []
+    params = {'serviceKey': key, 'lineno': number}
+    
+    list_api_res = requests.get('http://apis.data.go.kr/6260000/BusanBIMS/busInfo', params = params).text
+    list_api_tree = elemtree.fromstring(list_api_res)
+    
+    api_common_err = list_api_tree.find('./cmmMsgHeader/returnAuthMsg')
+    if api_common_err:
+        raise ValueError(api_common_err.text)
+    
+    api_err = int(list_api_tree.find('./header/resultCode').text)
+    
+    if api_err != 0:
+        raise ValueError(list_api_tree.find('./header/resultMsg').text)
+    
+    xml_bus_list = list_api_tree.findall('./body/items/item')
+    
+    for i in xml_bus_list:
+        name = i.find('./buslinenum').text
+        route_id = i.find('./lineid').text
+        start = i.find('./startpoint').text
+        end = i.find('./endpoint').text
+        route_type = convert_busan_bus_type(i.find('./bustype').text)
+        
+        bus_info_list.append({'name': name, 'id': route_id, 'desc': start + '~' + end, 'type': route_type})
+    
+    return bus_info_list
+
+def search_bus_info(number):
+    bus_info_list = []
+    
+    # 서울 버스 조회
+    try:
+        bus_info_list += search_seoul_bus_info(number)
+    except Exception as e:
+        print('서울 버스 정보를 조회하는 중 오류가 발생했습니다: ' + str(e))
+    
+    # 경기 버스 조회
+    try:
+        bus_info_list += search_gyeonggi_bus_info(number)
+    except Exception as e:
+        print('경기 버스 정보를 조회하는 중 오류가 발생했습니다: ' + str(e))
+    
+    # 부산 버스 조회
+    try:
+        bus_info_list += search_busan_bus_info(number)
+    except Exception as e:
+        print('부산 버스 정보를 조회하는 중 오류가 발생했습니다: ' + str(e))
         
     rx_number = re.compile('[0-9]+')
     is_number = bool(re.match('[0-9]+$', number))
@@ -491,9 +635,10 @@ def main():
             key_json = {'bus_api_key': '', 'naver_api_key_id': '', 'naver_api_key': '', 'mapbox_key': ''}
             json.dump(key_json, key_file, indent=4)
         
-        print('서울시/경기도 버스 API 키를 발급받아 key.json에 저장하십시오.')
+        print('각 지자체에 해당하는 버스 API 키를 발급받아 key.json에 저장하십시오.')
         print('서울시 API: https://www.data.go.kr/data/15000193/openapi.do')
         print('경기도 API: https://www.data.go.kr/data/15080662/openapi.do')
+        print('부산시 API: https://www.data.go.kr/data/15092750/openapi.do')
         return
     
     args = parser.parse_args()
@@ -543,10 +688,14 @@ def main():
             bus_stops = get_seoul_bus_stops(route_data['id'])
             route_positions = get_seoul_bus_route(route_data['id'])
             route_info = get_seoul_bus_type(route_data['id'])
-        else:
+        elif route_data['type'] <= 60:
             bus_stops = get_gyeonggi_bus_stops(route_data['id'])
             route_positions = get_gyeonggi_bus_route(route_data['id'])
             route_info = get_gyeonggi_bus_type(route_data['id'])
+        else:
+            route_positions, route_bims_id = get_busan_bus_route(route_data['name'])
+            bus_stops = get_busan_bus_stops(route_data['id'], route_bims_id)
+            route_info = get_busan_bus_type(route_bims_id)
     except requests.exceptions.ConnectTimeout:
         print('Request Timeout')
         return
@@ -590,7 +739,7 @@ def main():
     elif route_size[1] < route_size[0] / 1.5:
         route_size = (route_size[0], route_size[0] / 1.5)
     
-    size_factor = route_size[0] / 640 if route_size[0] > 640 else (1 - ((640 - route_size[0]) / 800))
+    size_factor = route_size[0] / 640
     min_interval = 60 * size_factor
     
     # 일방통행 여부 묻기
@@ -633,6 +782,22 @@ def main():
         # 광역급행버스
         line_color = '#00aad4'
         line_dark_color = '#0088aa'
+    elif route_info['type'] == 61:
+        # 부산 일반
+        line_color = '#3399ff'
+        line_dark_color = '#2770b7'
+    elif route_info['type'] == 62 or route_info['type'] == 63:
+        # 부산 급행 / 좌석
+        line_color = '#f58220'
+        line_dark_color = '#b45708'
+    elif route_info['type'] == 64:
+        # 부산 심야
+        line_color = '#aaaaaa'
+        line_dark_color = '#747474'
+    elif route_info['type'] == 65:
+        # 부산 마을
+        line_color = '#6EBF46'
+        line_dark_color = '#559734'
     else:
         # 서울 간선
         line_color = '#3d5bab'
@@ -723,7 +888,7 @@ def main():
         
         if i > trans_id:
             min_path_dist = min_distance_from_points(pos, points[:t_point])
-            if min_path_dist < min_interval / 4:
+            if min_path_dist < min_interval / 8:
                 section = 0
         
         main_stop_list.append({'ord': i, 'pos': pos, 'name': name, 'section': section, 'pass': pass_stop})
@@ -974,7 +1139,7 @@ def main():
     with open('bus.svg', mode='w+', encoding='utf-8') as f:
         if draw_full_svg:
             f.write('<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n')
-            f.write('<svg width="2230" height="1794" viewBox="0 0 2230 1794" xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"><style></style>\n')
+            f.write('<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"><style></style>\n')
             f.write('<sodipodi:namedview id="namedview1" pagecolor="{}" bordercolor="#cccccc" borderopacity="1" inkscape:deskcolor="#e5e5e5"/>'.format(page_color))
         
         if draw_background_map:
