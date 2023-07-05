@@ -17,12 +17,13 @@ def main():
             global key, naver_key_id, naver_key
             key_json = json.load(key_file)
             key = key_json['bus_api_key']
-            naver_key_id = key_json['naver_api_key_id']
-            naver_key = key_json['naver_api_key']
+            # naver_key_id = key_json['naver_api_key_id']
+            # naver_key = key_json['naver_api_key']
             mapbox_key = key_json['mapbox_key']
     except FileNotFoundError:
         with open('key.json', mode='w', encoding='utf-8') as key_file:
-            key_json = {'bus_api_key': '', 'naver_api_key_id': '', 'naver_api_key': '', 'mapbox_key': ''}
+            # key_json = {'bus_api_key': '', 'naver_api_key_id': '', 'naver_api_key': '', 'mapbox_key': ''}
+            key_json = {'bus_api_key': '', 'mapbox_key': ''}
             json.dump(key_json, key_file, indent=4)
         
         print('각 지자체에 해당하는 버스 API 키를 발급받아 key.json에 저장하십시오.')

@@ -1,4 +1,4 @@
-import math, requests, json, re, io, colorsys
+import math, requests, json, re, io, colorsys, sys, os
 import mapbox_vector_tile
 
 tile_url = 'https://api.mapbox.com/v4/{}/{}/{}/{}.mvt'
@@ -6,6 +6,10 @@ style_url = 'https://api.mapbox.com/styles/v1/{}'
 properties = {}
 
 sprite_cache = {}
+
+def resource_path(relative_path):
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
 
 def deg2num(lat_deg, lon_deg, zoom):
     lat_rad = math.radians(lat_deg)
@@ -325,7 +329,7 @@ def load_sprite(sprite_id):
     if sprite_id in sprite_cache:
         return sprite_cache[sprite_id]
     
-    sprite_path = 'styles/{}.svg'.format(sprite_id)
+    sprite_path = resource_path('styles/{}.svg'.format(sprite_id))
     
     with open(sprite_path, mode='r', encoding='utf-8') as f:
         svg_text = f.read()

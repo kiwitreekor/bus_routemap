@@ -4,6 +4,9 @@ import requests, time, sys, os, re, math, json, base64, urllib
 import mapbox
 from routemap import convert_gps, convert_pos, Mapframe, RouteMap
 
+class ApiKeyError(Exception):
+    pass
+
 route_type_str = {0: '공용', 1: '공항', 2: '마을', 3: '간선', 4: '지선', 5: '순환', 6: '광역', 7: '인천', 8: '경기', 9: '폐지', 10: '투어',
     11: '직행', 12: '좌석', 13: '일반', 14: '광역', 15: '따복', 16: '순환', 21: '농어촌직행', 22: '농어촌좌석', 23: '농어촌', 30: '마을', 
     41: '고속', 42: '시외좌석', 43: '시외일반', 51: '공항리무진', 52: '공항좌석', 53: '공항일반',
@@ -41,7 +44,10 @@ def get_seoul_bus_stops(key, routeid):
     route_api_tree = elemtree.fromstring(route_api_res)
 
     api_err = int(route_api_tree.find('./msgHeader/headerCd').text)
-
+    
+    if api_err == 7:
+        raise ApiKeyError()
+    
     if api_err != 0 and api_err != 4:
         raise ValueError(route_api_tree.find('./msgHeader/headerMsg').text)
 
@@ -66,6 +72,10 @@ def get_gyeonggi_bus_stops(key, routeid):
     
     route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteStationList', params = params, timeout = 20).text
     route_api_tree = elemtree.fromstring(route_api_res)
+    
+    api_common_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
+    if api_common_err != None:
+        raise ApiKeyError(api_common_err.text)
 
     api_err = int(route_api_tree.find('./msgHeader/resultCode').text)
 
@@ -117,6 +127,10 @@ def get_busan_bus_stops(key, route_id, route_bims_id):
     route_api_res2 = requests.get('https://apis.data.go.kr/6260000/BusanBIMS/busInfoByRouteId', params = params2, timeout = 20).text
     route_api_tree2 = elemtree.fromstring(route_api_res2)
     
+    api_common_err = route_api_tree2.find('./cmmMsgHeader/returnAuthMsg')
+    if api_common_err != None:
+        raise ApiKeyError(api_common_err.text)
+    
     bus_stop_items2 = route_api_tree2.findall('./body/items/item')
     for i in bus_stop_items2:
         if i.find('./rpoint').text == '1':
@@ -132,9 +146,12 @@ def get_seoul_bus_type(key, routeid):
     route_api_res = requests.get('http://ws.bus.go.kr/api/rest/busRouteInfo/getRouteInfo', params = params).text
     route_api_tree = elemtree.fromstring(route_api_res)
 
-    api_err = route_api_tree.find('./msgHeader/headerCd').text
+    api_err = int(route_api_tree.find('./msgHeader/headerCd').text)
+    
+    if api_err == 7:
+        raise ApiKeyError()
 
-    if api_err != '0' and api_err != '4':
+    if api_err != 0 and api_err != 4:
         raise ValueError(route_api_tree.find('./msgHeader/headerMsg').text)
 
     route_api_body = route_api_tree.find('./msgBody/itemList')
@@ -153,10 +170,14 @@ def get_gyeonggi_bus_type(key, routeid):
     
     route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteInfoItem', params = params, timeout = 20).text
     route_api_tree = elemtree.fromstring(route_api_res)
+    
+    api_common_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
+    if api_common_err != None:
+        raise ApiKeyError(api_common_err.text)
 
-    api_err = route_api_tree.find('./msgHeader/resultCode').text
+    api_err = int(route_api_tree.find('./msgHeader/resultCode').text)
 
-    if api_err != '0' and api_err != '4':
+    if api_err != 0 and api_err != 4:
         raise ValueError(route_api_tree.find('./msgHeader/resultMessage').text)
 
     route_api_body = route_api_tree.find('./msgBody/busRouteInfoItem')
@@ -195,9 +216,12 @@ def get_seoul_bus_route(key, routeid):
     route_api_res = requests.get('http://ws.bus.go.kr/api/rest/busRouteInfo/getRoutePath', params = params).text
     route_api_tree = elemtree.fromstring(route_api_res)
 
-    api_err = route_api_tree.find('./msgHeader/headerCd').text
+    api_err = int(route_api_tree.find('./msgHeader/headerCd').text)
 
-    if api_err != '0' and api_err != '4':
+    if api_err == 7:
+        raise ApiKeyError()
+
+    if api_err != 0 and api_err != 4:
         raise ValueError(route_api_tree.find('./msgHeader/headerMsg').text)
 
     route_api_body = route_api_tree.find('./msgBody')
@@ -219,10 +243,14 @@ def get_gyeonggi_bus_route(key, routeid):
     
     route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteLineList', params = params, timeout = 20).text
     route_api_tree = elemtree.fromstring(route_api_res)
+    
+    api_common_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
+    if api_common_err != None:
+        raise ApiKeyError(api_common_err.text)
 
-    api_err = route_api_tree.find('./msgHeader/resultCode').text
+    api_err = int(route_api_tree.find('./msgHeader/resultCode').text)
 
-    if api_err != '0' and api_err != '4':
+    if api_err != 0 and api_err != 4:
         raise ValueError(route_api_tree.find('./msgHeader/resultMessage').text)
 
     route_api_body = route_api_tree.find('./msgBody')
@@ -268,6 +296,9 @@ def search_seoul_bus_info(key, number):
     list_api_tree = elemtree.fromstring(list_api_res)
 
     api_err = int(list_api_tree.find('./msgHeader/headerCd').text)
+    
+    if api_err == 7:
+        raise ApiKeyError(list_api_tree.find('./msgHeader/headerMsg').text)
 
     if api_err != 0 and api_err != 4:
         raise ValueError(list_api_tree.find('./msgHeader/headerMsg').text)
@@ -300,6 +331,10 @@ def search_gyeonggi_bus_info(key, number):
         list_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteList', params = params, timeout = 20).text
         list_api_tree = elemtree.fromstring(list_api_res)
         
+        api_common_err = list_api_tree.find('./cmmMsgHeader/returnAuthMsg')
+        if api_common_err != None:
+            raise ApiKeyError(api_common_err.text)
+        
         api_err = int(list_api_tree.find('./msgHeader/resultCode').text)
         
         if api_err != 0 and api_err != 4:
@@ -327,10 +362,10 @@ def search_busan_bus_info(key, number):
     
     list_api_res = requests.get('http://apis.data.go.kr/6260000/BusanBIMS/busInfo', params = params).text
     list_api_tree = elemtree.fromstring(list_api_res)
-    
+        
     api_common_err = list_api_tree.find('./cmmMsgHeader/returnAuthMsg')
-    if api_common_err:
-        raise ValueError(api_common_err.text)
+    if api_common_err != None:
+        raise ApiKeyError(api_common_err.text)
     
     api_err = int(list_api_tree.find('./header/resultCode').text)
     
@@ -357,18 +392,24 @@ def search_bus_info(key, number, return_error = False):
     # 서울 버스 조회
     try:
         bus_info_list += search_seoul_bus_info(key, number)
+    except ApiKeyError as api_err:
+        exception = api_err
     except Exception as e:
         exception = ValueError('서울 버스 정보를 조회하는 중 오류가 발생했습니다: ' + str(e))
     
     # 경기 버스 조회
     try:
         bus_info_list += search_gyeonggi_bus_info(key, number)
+    except ApiKeyError as api_err:
+        exception = api_err
     except Exception as e:
         exception = ValueError('경기 버스 정보를 조회하는 중 오류가 발생했습니다: ' + str(e))
     
     # 부산 버스 조회
     try:
         bus_info_list += search_busan_bus_info(key, number)
+    except ApiKeyError as api_err:
+        exception = api_err
     except Exception as e:
         exception = ValueError('부산 버스 정보를 조회하는 중 오류가 발생했습니다: ' + str(e))
         

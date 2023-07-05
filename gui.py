@@ -1,10 +1,14 @@
 import os, sys, json, requests
-from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QAbstractItemView, QPushButton, QGroupBox, QRadioButton, QSpacerItem, QCheckBox, QProgressBar, QMessageBox
+from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QAbstractItemView, QPushButton, QGroupBox, QRadioButton, QSpacerItem, QCheckBox, QProgressBar, QMessageBox, QGridLayout
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtCore import QByteArray, Qt, QBasicTimer, QThread, QEventLoop, Signal
 from PySide6.QtGui import QIcon, QTextDocument, QTextOption
 import bus_api, routemap
+
+def resource_path(relative_path):
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
 
 class BusInfoThread(QThread):
     def __init__(self, parent):
@@ -15,13 +19,13 @@ class BusInfoThread(QThread):
     def run(self):
         self.widget.bus_info_list, error = bus_api.search_bus_info(self.widget.key, self.widget.search_input.text(), return_error = True)
         
-        if error:
-            self.widget.status_label.setText(str(error))
-        
         if len(self.widget.bus_info_list) < 1: 
             self.widget.status_label.setText("검색 결과가 없습니다.")
         else:
             self.widget.status_label.setText("{}건의 검색 결과가 있습니다.".format(len(self.widget.bus_info_list)))
+        
+        if error:
+            self.widget.status_label.setText(str(error))
             
         self.widget.result_table.setRowCount(len(self.widget.bus_info_list))
         
@@ -88,7 +92,7 @@ class OverwriteWindow(QWidget):
         self.setWindowTitle(" ")
         self.setWindowModality(Qt.ApplicationModal)
         
-        icon = QIcon("resources/icon.png")
+        icon = QIcon(resource_path("resources/icon.ico"))
         self.setWindowIcon(icon)
         
         self.text_label = QLabel('<p style="margin-bottom: 10px"><b>이름이 "{}"인 파일이 이미 존재합니다.</p><p>덮어쓰시겠습니까?</p>'.format(filename))
@@ -141,7 +145,7 @@ class RenderWindow(QWidget):
         
         self.setWindowTitle("{}".format(route_info['name']))
         
-        icon = QIcon("resources/icon.png")
+        icon = QIcon(resource_path("resources/icon.ico"))
         self.setWindowIcon(icon)
         
         group_theme = QGroupBox("테마")
@@ -207,6 +211,11 @@ class RenderWindow(QWidget):
     
     def render(self):
         filename = self.filename_input.text()
+        folder_path = os.path.dirname(filename)
+        
+        if folder_path != '' and not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        
         self.overwrite_result = 0
         
         if os.path.exists(filename):
@@ -265,6 +274,67 @@ class RenderWindow(QWidget):
         self.parent_widget.status_label.setText('"{}"로 내보냈습니다.'.format(filename))
         self.close()
 
+class OptionsWindow(QWidget):
+    def __init__(self, parent):
+        super().__init__()
+        
+        self.parent_widget = parent
+        
+        self.mapbox_key = parent.mapbox_key
+        self.key = parent.key
+        
+        self.setWindowTitle("설정")
+        
+        icon = QIcon(resource_path("resources/icon.ico"))
+        self.setWindowIcon(icon)
+        
+        group_api_key = QGroupBox("API 키")
+        
+        self.openapi_key_input = QLineEdit()
+        self.mapbox_key_input = QLineEdit()
+        
+        self.openapi_key_input.setText(self.key)
+        self.mapbox_key_input.setText(self.mapbox_key)
+        
+        api_key_grid_layout = QGridLayout(group_api_key)
+        
+        api_key_grid_layout.addWidget(QLabel("OpenAPI 키: "), 0, 0)
+        api_key_grid_layout.addWidget(self.openapi_key_input, 0, 1)
+        api_key_grid_layout.addWidget(QLabel("Mapbox 키: "), 1, 0)
+        api_key_grid_layout.addWidget(self.mapbox_key_input, 1, 1)
+        
+        self.cancel_button = QPushButton("취소")
+        self.execute_button = QPushButton("저장")
+        
+        self.cancel_button.clicked.connect(self.cancel)
+        self.execute_button.clicked.connect(self.save)
+        
+        execute_layout = QHBoxLayout()
+        execute_layout.addStretch(1)
+        execute_layout.addWidget(self.cancel_button)
+        execute_layout.addWidget(self.execute_button)
+
+        layout = QVBoxLayout()
+        layout.addWidget(group_api_key)
+        layout.addStretch(1)
+        layout.addLayout(execute_layout)
+
+        self.setLayout(layout)
+        self.setFixedSize(360, 140)
+    
+    def cancel(self):
+        self.close()
+    
+    def save(self):
+        with open('key.json', mode='w', encoding='utf-8') as key_file:
+            key_json = {'bus_api_key': self.openapi_key_input.text(), 'mapbox_key': self.mapbox_key_input.text()}
+            json.dump(key_json, key_file, indent=4)
+            
+        self.parent_widget.key = self.openapi_key_input.text()
+        self.parent_widget.mapbox_key = self.mapbox_key_input.text()
+        
+        self.close()
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -278,7 +348,7 @@ class MainWindow(QMainWindow):
         
         self.setWindowTitle("버스 노선도 생성기 GUI")
         
-        icon = QIcon("resources/icon.png")
+        icon = QIcon(resource_path("resources/icon.ico"))
         self.setWindowIcon(icon)
 
         self.result_table = QTableWidget()
@@ -306,12 +376,17 @@ class MainWindow(QMainWindow):
         search_label = QLabel("검색: ")
         
         self.status_label = QLabel()
+        
         self.execute_button = QPushButton("생성")
         self.execute_button.setEnabled(False)
         self.execute_button.clicked.connect(self.open_render_window)
         
+        self.options_button = QPushButton("설정")
+        self.options_button.clicked.connect(self.open_option_window)
+        
         status_layout = QHBoxLayout()
         status_layout.addWidget(self.status_label, stretch = 1)
+        status_layout.addWidget(self.options_button)
         status_layout.addWidget(self.execute_button)
         
         search_layout = QHBoxLayout()
@@ -339,6 +414,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
     
     def search_input_return(self):
+        if not self.search_input.text():
+            return
+        
         if not self.is_loading_bus_info:
             self.is_loading_bus_info = True
             self.search_input.setEnabled(False)
@@ -363,6 +441,10 @@ class MainWindow(QMainWindow):
     def open_render_window(self):
         self.render_window = RenderWindow(self, self.route_info, self.bus_stops, self.preview_points)
         self.render_window.show()
+    
+    def open_option_window(self):
+        self.option_window = OptionsWindow(self)
+        self.option_window.show()
     
     def load_key(self):
         try:
