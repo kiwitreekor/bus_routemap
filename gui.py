@@ -121,6 +121,8 @@ class RenderWindow(QWidget):
         self.mapbox_key = parent.mapbox_key
         self.key = parent.key
         
+        self.svg_map = None
+        
         self.setWindowTitle("{}".format(route_info['name']))
         
         icon = QIcon(resource_path("resources/icon.ico"))
@@ -172,22 +174,109 @@ class RenderWindow(QWidget):
         execute_layout.addWidget(self.filename_input, stretch = 1)
         execute_layout.addWidget(self.execute_button)
 
-        layout = QVBoxLayout()
-        layout.addWidget(group_theme)
-        layout.addWidget(group_oneway)
-        layout.addWidget(group_etc)
-        layout.addStretch(1)
-        layout.addLayout(execute_layout)
-
-        self.setLayout(layout)
-        self.setFixedSize(240, 240)
+        self.settings_layout = QVBoxLayout()
+        self.settings_layout.addWidget(group_theme)
+        self.settings_layout.addWidget(group_oneway)
+        self.settings_layout.addWidget(group_etc)
+        self.settings_layout.addStretch(1)
+        self.settings_layout.addLayout(execute_layout)
         
-        self.execute_button.clicked.connect(self.render)
+        preview_label = QLabel("미리보기")
+        
+        self.svg_container = QWidget()
+        
+        self.svg_widget = QSvgWidget(self.svg_container)
+        self.svg_widget.renderer().setAspectRatioMode(Qt.KeepAspectRatio)
+        
+        preview_layout = QVBoxLayout()
+        preview_layout.addWidget(preview_label)
+        preview_layout.addWidget(self.svg_container, stretch = 1)
+        
+        layout = QHBoxLayout()
+        layout.addLayout(preview_layout, stretch = 1)
+        layout.addLayout(self.settings_layout)
+        
+        self.setLayout(layout)
+        self.setFixedSize(720, 240)
+        
+        self.execute_button.clicked.connect(self.export)
+        
+        self.button_light_theme.clicked.connect(self.refresh_preview)
+        self.button_dark_theme.clicked.connect(self.refresh_preview)
+        
+        self.button_oneway_yes.clicked.connect(self.refresh_preview)
+        self.button_oneway_no.clicked.connect(self.refresh_preview)
+        
+        self.checkbox_background_map.clicked.connect(self.refresh_preview)
+    
+    def showEvent(self, event):
+        self.refresh_preview()
     
     def handle_result_status(self, value):
         self.overwrite_result = value
     
-    def render(self):
+    def render(self, draw_background_map = False):
+        theme = 'light' if self.button_light_theme.isChecked() else 'dark'
+        is_one_way = self.button_oneway_yes.isChecked()
+    
+        self.bus_routemap = routemap.RouteMap(self.route_info, self.bus_stops, self.points, is_one_way = is_one_way)
+        
+        route_size = self.bus_routemap.mapframe.size()
+        
+        if route_size[0] < route_size[1] / 1.5:
+            route_size = (route_size[1] / 1.5, route_size[1])
+        elif route_size[1] < route_size[0] / 1.5:
+            route_size = (route_size[0], route_size[0] / 1.5)
+        
+        size_factor = route_size[0] / 640
+        min_interval = 60 * size_factor
+        
+        self.svg_map = self.bus_routemap.render(size_factor, min_interval, theme = theme)
+        
+        self.bus_routemap.mapframe.extend(size_factor * 30)
+        
+        if theme == 'light':
+            mapbox_style = 'kiwitree/clinp1vgh002t01q4c2366q3o'
+            page_color = '#ffffff'
+        elif theme == 'dark':
+            mapbox_style = 'kiwitree/clirdaqpr00hu01pu8t7vhmq7'
+            page_color = '#282828'
+        
+        if draw_background_map:
+            self.svg_map = bus_api.get_mapbox_map(self.bus_routemap.mapframe, self.mapbox_key, mapbox_style) + self.svg_map
+        else:
+            x = self.bus_routemap.mapframe.left
+            y = self.bus_routemap.mapframe.top
+            width = self.bus_routemap.mapframe.width()
+            height = self.bus_routemap.mapframe.height()
+            
+            self.svg_map = '<rect x="{}" y="{}" width="{}" height="{}" style="fill:{}" />'.format(x, y, width, height, page_color) + self.svg_map
+    
+    def refresh_preview(self):
+        self.render(self.checkbox_background_map.isChecked())
+        
+        width = self.bus_routemap.mapframe.width()
+        height = self.bus_routemap.mapframe.height()
+        
+        svg = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+        svg += '<svg width="{0}" height="{1}" viewBox="0 0 {0} {1}" xmlns="http://www.w3.org/2000/svg"><style></style>\n'.format(width, height)
+        svg += '<g transform="translate({}, {})">\n'.format(-self.bus_routemap.mapframe.left, -self.bus_routemap.mapframe.top)
+        svg += self.svg_map
+        svg += '</g></svg>'
+        
+        widget_width = self.svg_container.width()
+        widget_height = self.svg_container.width() / width * height
+        
+        self.svg_widget.load(QByteArray(svg.encode()))
+        self.svg_widget.resize(widget_width, widget_height)
+        
+        if widget_height > self.svg_container.height():
+            window_width = self.width()
+            window_height = self.height()
+            
+            self.setFixedSize(window_width, window_height + (widget_height - self.svg_container.height()))
+    
+    def export(self):
         filename = self.filename_input.text()
         folder_path = os.path.dirname(filename)
         
@@ -209,45 +298,20 @@ class RenderWindow(QWidget):
             if self.overwrite_result == 0:
                 return
         
-        theme = 'light' if self.button_light_theme.isChecked() else 'dark'
-        is_one_way = self.button_oneway_yes.isChecked()
-        draw_background_map = self.checkbox_background_map.isChecked()
-    
-        bus_routemap = routemap.RouteMap(self.route_info, self.bus_stops, self.points, is_one_way = is_one_way)
+        self.render(self.checkbox_background_map.isChecked())
         
-        route_size = bus_routemap.mapframe.size()
-        
-        if route_size[0] < route_size[1] / 1.5:
-            route_size = (route_size[1] / 1.5, route_size[1])
-        elif route_size[1] < route_size[0] / 1.5:
-            route_size = (route_size[0], route_size[0] / 1.5)
-        
-        size_factor = route_size[0] / 640
-        min_interval = 60 * size_factor
-        
-        svg = bus_routemap.render(size_factor, min_interval, theme)
-        
-        bus_routemap.mapframe.extend(size_factor * 30)
-        
-        if theme == 'light':
-            mapbox_style = 'kiwitree/clinp1vgh002t01q4c2366q3o'
+        if self.button_light_theme.isChecked():
             page_color = '#ffffff'
-        elif theme == 'dark':
-            mapbox_style = 'kiwitree/clirdaqpr00hu01pu8t7vhmq7'
+        else:
             page_color = '#282828'
         
         with open(filename, mode='w+', encoding='utf-8') as f:
             f.write('<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n')
-            f.write('<svg width="{0}" height="{1}" viewBox="0 0 {0} {1}" xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"><style></style>\n'.format(bus_routemap.mapframe.width(), bus_routemap.mapframe.height()))
+            f.write('<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"><style></style>\n')
             f.write('<sodipodi:namedview id="namedview1" pagecolor="{}" bordercolor="#cccccc" borderopacity="1" inkscape:deskcolor="#e5e5e5"/>'.format(page_color))
-            f.write('<g transform="translate({}, {})">\n'.format(-bus_routemap.mapframe.left, -bus_routemap.mapframe.top))
-            
-            if draw_background_map:
-                f.write(bus_api.get_mapbox_map(bus_routemap.mapframe, self.mapbox_key, mapbox_style))
-            
-            f.write(svg)
-            f.write('</g>')
-            f.write('</svg>')
+            f.write('<g transform="translate({}, {})">\n'.format(-self.bus_routemap.mapframe.left, -self.bus_routemap.mapframe.top))
+            f.write(self.svg_map)
+            f.write('</g></svg>')
         
         self.parent_widget.status_label.setText('"{}"로 내보냈습니다.'.format(filename))
         self.close()
@@ -349,8 +413,6 @@ class MainWindow(QMainWindow):
         self.result_table.setColumnWidth(3, 220)
         self.result_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         
-        self.svg_widget = QSvgWidget(self)
-        
         self.search_input = QLineEdit()
         self.search_input.returnPressed.connect(self.search_input_return)
         
@@ -375,6 +437,7 @@ class MainWindow(QMainWindow):
         search_layout.addWidget(self.search_input)
         
         preview_label = QLabel("미리보기")
+        self.svg_widget = QSvgWidget(self)
         
         preview_layout = QVBoxLayout()
         preview_layout.addWidget(preview_label)

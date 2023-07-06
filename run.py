@@ -120,7 +120,7 @@ def main():
     size_factor = route_size[0] / 640
     min_interval = 60 * size_factor
     
-    svg = routemap.render(size_factor, min_interval, args.style)
+    svg = routemap.render(size_factor, min_interval, theme = args.style)
     
     routemap.mapframe.extend(10)
     

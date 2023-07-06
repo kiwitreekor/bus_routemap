@@ -228,7 +228,7 @@ def get_color(color_style, feature = None):
     if isinstance(color_style, str):
         return color_to_hex(color_style)
     else:
-        return get_value(color_style, feature)
+        return color_to_hex(get_value(color_style, feature))
 
 def draw_geometry(f, feature, style):
     style_str = css_style(style)

@@ -361,7 +361,7 @@ class RouteMap():
             if min_dist > min_interval:
                 minor_stop_list.append({'ord': i, 'pos': pos, 'name': self.bus_stops[i]['name'], 'section': section, 'pass': pass_stop})
         
-        return main_stop_list, minor_stop_list
+        return main_stop_list + minor_stop_list
 
     def draw_bus_info(self, size_factor):
         name_match = re.search('[0-9A-Za-z]+', self.route_info['name'])
@@ -383,7 +383,7 @@ class RouteMap():
             pos_x = self.mapframe.left
         pos_y = self.mapframe.top
         
-        pos_y -= 120 * size_factor
+        pos_y -= 135 * size_factor
         
         self.mapframe.update_rect((pos_x, pos_y, bus_info_width, 100 * size_factor))
         
@@ -520,7 +520,7 @@ class RouteMap():
                 segment_end = i
             elif segment_end >= 0:
                 path_segment = get_point_segment(self.points, segment_start, segment_end, skip_threshold * 2)
-                path_points.append(self.points[path_segment[0]:path_segment[1]])
+                path_points.append(self.points[path_segment[0]:min(path_segment[1]+1, len(self.points))])
                 segment_end = -1
         
         svg_path = ''
@@ -535,7 +535,7 @@ class RouteMap():
         
         return svg_path
     
-    def render(self, size_factor, min_interval, theme = 'light'):
+    def render(self, size_factor, min_interval, bus_stop_list = None, theme = 'light'):
         style_path_base = "display:inline;fill:none;stroke-width:{};stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1".format(8 * size_factor)
         style_circle_base = "opacity:1;fill-opacity:1;stroke-width:{};stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;paint-order:normal".format(3.2 * size_factor)
     
@@ -563,16 +563,13 @@ class RouteMap():
         self.trans_id = self.get_trans_id()
         self.t_point = find_nearest_point(convert_pos(self.bus_stops[self.trans_id]['pos']), self.points)
         
-        main_stop_list, minor_stop_list = self.parse_bus_stops(min_interval)
+        if bus_stop_list == None:
+            bus_stop_list = self.parse_bus_stops(min_interval)
         self.text_rects = []
         
         svg = ''
-    
-        for stop in main_stop_list:
-            # svg += self.draw_bus_stop(stop, size_factor, 0)
-            svg += self.draw_bus_stop(stop, size_factor, 1)
         
-        for stop in minor_stop_list:
+        for stop in bus_stop_list:
             svg += self.draw_bus_stop(stop, size_factor, 1)
         
         svg = self.render_path(size_factor) + svg
