@@ -1,8 +1,8 @@
-import os, sys, json, requests
+import os, sys, json, requests, threading
 from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QAbstractItemView, QPushButton, QGroupBox, QRadioButton, QSpacerItem, QCheckBox, QProgressBar, QMessageBox, QGridLayout
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QSvgWidget
-from PySide6.QtCore import QByteArray, Qt, QBasicTimer, QThread, QEventLoop, Signal
+from PySide6.QtCore import QByteArray, Qt, QBasicTimer, QObject, QEventLoop, Signal, Slot
 from PySide6.QtGui import QIcon, QTextDocument, QTextOption
 import bus_api, routemap
 
@@ -10,78 +10,56 @@ def resource_path(relative_path):
     base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)
 
-class BusInfoThread(QThread):
+class BusInfoThread(QObject):
+    thread_finished = Signal(str)
+    
     def __init__(self, parent):
         super(BusInfoThread, self).__init__(parent)
-        
         self.widget = parent
         
     def run(self):
-        self.widget.bus_info_list, error = bus_api.search_bus_info(self.widget.key, self.widget.search_input.text(), return_error = True)
-        
-        if len(self.widget.bus_info_list) < 1: 
-            self.widget.status_label.setText("검색 결과가 없습니다.")
-        else:
-            self.widget.status_label.setText("{}건의 검색 결과가 있습니다.".format(len(self.widget.bus_info_list)))
-        
+        bus_info_list, error = bus_api.search_bus_info(self.widget.key, self.widget.search_input.text(), return_error = True)
+        error_str = None
         if error:
-            self.widget.status_label.setText(str(error))
-            
-        self.widget.result_table.setRowCount(len(self.widget.bus_info_list))
+            error_str = str(error)
+        result_json = json.dumps({'result': bus_info_list, 'error': error_str})
         
-        for i, bus in enumerate(self.widget.bus_info_list):
-            item_region = QTableWidgetItem(bus_api.convert_type_to_region(bus['type']))
-            item_type = QTableWidgetItem(bus_api.route_type_str[bus['type']])
-            item_name = QTableWidgetItem(bus['name'])
-            item_desc = QTableWidgetItem(bus['desc'])
-            
-            self.widget.result_table.setItem(i, 0, item_region)
-            self.widget.result_table.setItem(i, 1, item_type)
-            self.widget.result_table.setItem(i, 2, item_name)
-            self.widget.result_table.setItem(i, 3, item_desc)
-        
-        self.widget.is_loading_bus_info = False
-        self.widget.search_input.setEnabled(True)
+        self.thread_finished.emit(result_json)
 
-class BusRouteThread(QThread):
-    def __init__(self, parent, route_data):
+class BusRouteThread(QObject):
+    thread_finished = Signal(str)
+    
+    def __init__(self, parent):
         super(BusRouteThread, self).__init__(parent)
         
         self.widget = parent
-        self.route_data = route_data
         
-    def run(self):
-        self.widget.preview_line_color, self.widget.preview_line_dark_color = routemap.get_bus_color(self.route_data)
+    def run(self, route_data):
+        error = None
+        route_positions = None
+        route_info = None
+        bus_stops = None
+        
         try:
-            if self.route_data['type'] <= 10:
-                route_positions = bus_api.get_seoul_bus_route(self.widget.key, self.route_data['id'])
-                self.widget.route_info = bus_api.get_seoul_bus_type(self.widget.key, self.route_data['id'])
-                self.widget.bus_stops = bus_api.get_seoul_bus_stops(self.widget.key, self.route_data['id'])
-            elif self.route_data['type'] <= 60:
-                route_positions = bus_api.get_gyeonggi_bus_route(self.widget.key, self.route_data['id'])
-                self.widget.route_info = bus_api.get_gyeonggi_bus_type(self.widget.key, self.route_data['id'])
-                self.widget.bus_stops = bus_api.get_gyeonggi_bus_stops(self.widget.key, self.route_data['id'])
+            if route_data['type'] <= 10:
+                route_positions = bus_api.get_seoul_bus_route(self.widget.key, route_data['id'])
+                route_info = bus_api.get_seoul_bus_type(self.widget.key, route_data['id'])
+                bus_stops = bus_api.get_seoul_bus_stops(self.widget.key, route_data['id'])
+            elif route_data['type'] <= 60:
+                route_positions = bus_api.get_gyeonggi_bus_route(self.widget.key, route_data['id'])
+                route_info = bus_api.get_gyeonggi_bus_type(self.widget.key, route_data['id'])
+                bus_stops = bus_api.get_gyeonggi_bus_stops(self.widget.key, route_data['id'])
             else:
-                route_positions, route_bims_id = bus_api.get_busan_bus_route(self.route_data['name'])
-                self.widget.route_info = bus_api.get_busan_bus_type(self.widget.key, route_bims_id)
-                self.widget.bus_stops = bus_api.get_busan_bus_stops(self.widget.key, self.route_data['id'], route_bims_id)
-            
-            self.widget.preview_points = []
-
-            for pos in route_positions:
-                self.widget.preview_points.append(routemap.convert_pos(pos))
-            
-            self.widget.render_preview_routemap()
+                route_positions, route_bims_id = bus_api.get_busan_bus_route(route_data['name'])
+                route_info = bus_api.get_busan_bus_type(self.widget.key, route_bims_id)
+                bus_stops = bus_api.get_busan_bus_stops(self.widget.key, route_data['id'], route_bims_id)
         except requests.exceptions.ConnectTimeout:
-            self.widget.status_label.setText("[오류] Connection Timeout")
-            self.widget.svg_widget.load(QByteArray())
+            error = "[오류] Connection Timeout"
         except Exception as e:
-            self.widget.status_label.setText("[오류] " + str(e))
-            self.widget.svg_widget.load(QByteArray())
+            error = "[오류] " + str(e)
         
-        self.widget.is_loading_bus_route = False
-        self.widget.result_table.setEnabled(True)
-        self.widget.execute_button.setEnabled(True)
+        result_json = json.dumps({'result': {'route_positions': route_positions, 'route_info': route_info, 'bus_stops': bus_stops}, 'error': error})
+        self.thread_finished.emit(result_json)
         
 class OverwriteWindow(QWidget):
     result_signal = Signal(int)
@@ -342,9 +320,12 @@ class MainWindow(QMainWindow):
         self.load_key()
         self.bus_info_list = []
         self.preview_points = []
+            
+        self.bus_info_thread = BusInfoThread(self)
+        self.bus_route_thread = BusRouteThread(self)
         
-        self.is_loading_bus_info = False
-        self.is_loading_bus_route = False
+        self.bus_info_thread.thread_finished.connect(self.bus_info_finished)
+        self.bus_route_thread.thread_finished.connect(self.bus_route_finished)
         
         self.setWindowTitle("버스 노선도 생성기 GUI")
         
@@ -417,26 +398,76 @@ class MainWindow(QMainWindow):
         if not self.search_input.text():
             return
         
-        if not self.is_loading_bus_info:
-            self.is_loading_bus_info = True
-            self.search_input.setEnabled(False)
+        self.search_input.setEnabled(False)
+        self.execute_button.setEnabled(False)
+        self.result_table.clearSelection()
+        self.svg_widget.load(QByteArray())
+        
+        t = threading.Thread(target=self.bus_info_thread.run)
+        t.daemon = True
+        t.start()
+    
+    @Slot(str)
+    def bus_info_finished(self, result_json):
+        result = json.loads(result_json)
+        
+        self.bus_info_list = result['result']
+        
+        if len(self.bus_info_list) < 1: 
+            self.status_label.setText("검색 결과가 없습니다.")
+        else:
+            self.status_label.setText("{}건의 검색 결과가 있습니다.".format(len(self.bus_info_list)))
+        
+        if result['error'] != None:
+            self.status_label.setText(result['error'])
             
-            self.execute_button.setEnabled(False)
-            self.result_table.clearSelection()
-            self.svg_widget.load(QByteArray())
+        self.result_table.setRowCount(len(self.bus_info_list))
+        
+        for i, bus in enumerate(self.bus_info_list):
+            item_region = QTableWidgetItem(bus_api.convert_type_to_region(bus['type']))
+            item_type = QTableWidgetItem(bus_api.route_type_str[bus['type']])
+            item_name = QTableWidgetItem(bus['name'])
+            item_desc = QTableWidgetItem(bus['desc'])
             
-            bus_info_thread = BusInfoThread(self)
-            bus_info_thread.run()
+            self.result_table.setItem(i, 0, item_region)
+            self.result_table.setItem(i, 1, item_type)
+            self.result_table.setItem(i, 2, item_name)
+            self.result_table.setItem(i, 3, item_desc)
+            
+        self.search_input.setEnabled(True)
     
     def draw_route_preview(self, item):
-        if not self.is_loading_bus_route:
-            self.is_loading_bus_route = True
-            self.result_table.setEnabled(False)
-            
-            route_data = self.bus_info_list[item.row()]
-            
-            bus_route_thread = BusRouteThread(self, route_data)
-            bus_route_thread.run()
+        self.result_table.setEnabled(False)
+        route_data = self.bus_info_list[item.row()]
+        
+        self.preview_line_color, self.preview_line_dark_color = routemap.get_bus_color(route_data)
+        
+        t = threading.Thread(target=self.bus_route_thread.run, args=(route_data,))
+        t.daemon = True
+        t.start()
+    
+    @Slot(str)
+    def bus_route_finished(self, result_json):
+        result = json.loads(result_json)
+        
+        if result['error'] != None:
+            self.status_label.setText(result['error'])
+            self.svg_widget.load(QByteArray())
+            return
+        
+        self.route_info = result['result']['route_info']
+        self.bus_stops = result['result']['bus_stops']
+        route_positions = result['result']['route_positions']
+        
+        self.preview_points = []
+
+        for pos in route_positions:
+            self.preview_points.append(routemap.convert_pos(pos))
+        
+        self.render_preview_routemap()
+        
+        self.result_table.setEnabled(True)
+        self.execute_button.setEnabled(True)
     
     def open_render_window(self):
         self.render_window = RenderWindow(self, self.route_info, self.bus_stops, self.preview_points)

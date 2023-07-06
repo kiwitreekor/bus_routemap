@@ -294,7 +294,7 @@ class RouteMap():
     def get_trans_id(self):
         for i, stop in enumerate(self.bus_stops):
             if self.is_one_way:
-                is_trans = i == len(bus_stops) - 1
+                is_trans = i == len(self.bus_stops) - 1
             else:
                 is_trans = bool(stop['is_trans'])
             
@@ -375,18 +375,23 @@ class RouteMap():
         bus_name_width = get_text_width(bus_name_main) * 72 + get_text_width(bus_name_suffix) * 60 + 45
         bus_startend_width = (get_text_width(self.route_info['start']) + get_text_width(self.route_info['end'])) * 57 + 150
         
-        pos_x = self.mapframe.left
+        bus_info_width = (bus_name_width + bus_startend_width) * size_factor
+        
+        if self.mapframe.width() < bus_info_width:
+            pos_x = self.mapframe.center()[0] - bus_info_width / 2
+        else:
+            pos_x = self.mapframe.left
         pos_y = self.mapframe.top
         
-        pos_y -= 100 * size_factor
+        pos_y -= 120 * size_factor
         
-        self.mapframe.update_y(pos_y)
+        self.mapframe.update_rect((pos_x, pos_y, bus_info_width, 100 * size_factor))
         
         bus_name_svg = bus_name_main + '<tspan style="font-size:72px">{}</tspan>'.format(bus_name_suffix)
         if bus_name_main[0] == 'N':
             bus_name_svg = '<tspan style="fill:#ffcc00">N</tspan>' + bus_name_svg[1:]
         
-        svg_text = '<g id="businfo" transform="translate({0}, {1}) scale({2}, {2})" style="display:inline">'.format(pos_x, pos_y, size_factor * 0.75)
+        svg_text = '<g id="businfo" transform="translate({0}, {1}) scale({2}, {2})" style="display:inline">'.format(pos_x, pos_y, size_factor)
         svg_text += '<rect y="0" x="0" height="100" width="{}" id="busname_bg" style="opacity:1;fill:{};fill-opacity:1;stroke:none;" />'.format(bus_name_width, self.line_color)
         svg_text += '<text id="busname" y="82" x="20" style="font-weight:normal;font-size:85.3333px;font-family:\'Din Medium\';text-align:start;fill:#ffffff">{}</text>'.format(bus_name_svg)
         svg_text += '<rect y="0" x="{}" height="100" width="{}" id="busstartend_bg" style="opacity:1;fill:#ffffff;fill-opacity:1;stroke:none;" />'.format(bus_name_width, bus_startend_width)
@@ -494,7 +499,6 @@ class RouteMap():
         path_points = []
         
         path_points.append(self.points[:self.t_point+1])
-        path_points.append(self.points[self.t_point:])
         
         if self.route_info['type'] <= 10:
             # skip = 2
@@ -505,47 +509,29 @@ class RouteMap():
         is_path_dark = False
         skip_threshold = 5 * size_factor
         
-        dark_segments = []
-        
         segment_start = 0
         segment_end = -1
         
-        for i, point in enumerate(path_points[1]):
-            min_dist = min_distance_from_segments(point, path_points[0])
-            if min_dist > skip_threshold and i != len(path_points[1]) - 1:
+        for i in range(self.t_point, len(self.points)):
+            min_dist = min_distance_from_segments(self.points[i], path_points[0])
+            if min_dist > skip_threshold and i < len(self.points) - 1:
                 if segment_end < 0:
                     segment_start = i
                 segment_end = i
             elif segment_end >= 0:
-                dark_segments.append(get_point_segment(path_points[1], segment_start, segment_end, skip_threshold * 2))
+                path_segment = get_point_segment(self.points, segment_start, segment_end, skip_threshold * 2)
+                path_points.append(self.points[path_segment[0]:path_segment[1]])
                 segment_end = -1
-        
-        if len(dark_segments) == 0:
-            dark_segments.append([0, 0])
         
         svg_path = ''
         
-        for p in path_points:
-            svg_path_d = 'M {:.5f} {:.5f} '.format(p[0][0], p[0][1])
-            segment_num = 0
-            i = skip
-            while i < len(p):
-                if (i < dark_segments[segment_num][0] or i > dark_segments[segment_num][1]) and is_path_dark:
-                    svg_path_d += 'M {:.5f} {:.5f} '.format(p[i][0], p[i][1])
-                    if i > dark_segments[segment_num][1] and segment_num < len(dark_segments) - 1:
-                        segment_num += 1
-                    i += 1
-                else:
-                    svg_path_d += 'L {:.5f} {:.5f} '.format(p[i][0], p[i][1])
-                    i += skip
-
-            if i >= dark_segments[segment_num][1] and is_path_dark:
-                svg_path_d += 'M {:.5f} {:.5f} '.format(p[-1][0], p[-1][1])
+        for i, path in enumerate(path_points):
+            if i == 0 or self.is_one_way:
+                path_style = self.style_path
             else:
-                svg_path_d += 'L {:.5f} {:.5f} '.format(p[-1][0], p[-1][1])
-                
-            svg_path = '<path style="{}" d="{}" />\n'.format(self.style_path_dark if is_path_dark else self.style_path, svg_path_d) + svg_path
-            is_path_dark = not self.is_one_way
+                path_style = self.style_path_dark
+            
+            svg_path = make_svg_path(path_style, path) + svg_path
         
         return svg_path
     
@@ -590,6 +576,6 @@ class RouteMap():
             svg += self.draw_bus_stop(stop, size_factor, 1)
         
         svg = self.render_path(size_factor) + svg
-        svg += self.draw_bus_info(size_factor) + '\n'
+        svg += self.draw_bus_info(size_factor * 0.75) + '\n'
         
         return svg
