@@ -290,6 +290,8 @@ class RouteMap():
         
         self.is_one_way = is_one_way
         self.mapframe = Mapframe.from_points(self.points)
+        
+        self.update_trans_id(self.get_trans_id())
 
     def get_trans_id(self):
         for i, stop in enumerate(self.bus_stops):
@@ -302,6 +304,13 @@ class RouteMap():
                 return i
         
         return None
+    
+    def update_trans_id(self, new_id):
+        if new_id >= len(self.bus_stops) or new_id < 0:
+            raise ValueError()
+        
+        self.trans_id = new_id
+        self.t_point = find_nearest_point(convert_pos(self.bus_stops[self.trans_id]['pos']), self.points)
 
     def parse_bus_stops(self, min_interval):
         # 버스 정류장 렌더링
@@ -535,7 +544,7 @@ class RouteMap():
         
         return svg_path
     
-    def render(self, size_factor, min_interval, bus_stop_list = None, theme = 'light'):
+    def render(self, size_factor, min_interval, bus_stops = None, theme = 'light'):
         style_path_base = "display:inline;fill:none;stroke-width:{};stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1".format(8 * size_factor)
         style_circle_base = "opacity:1;fill-opacity:1;stroke-width:{};stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;paint-order:normal".format(3.2 * size_factor)
     
@@ -560,16 +569,13 @@ class RouteMap():
         else:
             raise ValueError("Unsupported theme: {}".format(theme))
         
-        self.trans_id = self.get_trans_id()
-        self.t_point = find_nearest_point(convert_pos(self.bus_stops[self.trans_id]['pos']), self.points)
-        
-        if bus_stop_list == None:
-            bus_stop_list = self.parse_bus_stops(min_interval)
+        if bus_stops == None:
+            bus_stops = self.parse_bus_stops(min_interval)
         self.text_rects = []
         
         svg = ''
         
-        for stop in bus_stop_list:
+        for stop in bus_stops:
             svg += self.draw_bus_stop(stop, size_factor, 1)
         
         svg = self.render_path(size_factor) + svg

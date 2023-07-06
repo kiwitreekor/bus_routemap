@@ -108,6 +108,133 @@ class OverwriteWindow(QWidget):
         self.result_signal.emit(0)
         self.close()
 
+class BusStopEditWindow(QWidget):
+    def __init__(self, parent):
+        super().__init__()
+        
+        self.window = parent
+        
+        self.setWindowTitle("정류장 목록 편집")
+        
+        icon = QIcon(resource_path("resources/icon.ico"))
+        self.setWindowIcon(icon)
+        
+        self.setFixedSize(600, 400)
+
+        self.bus_stop_table = QTableWidget()
+        self.bus_stop_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.bus_stop_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.bus_stop_table.setColumnCount(6)
+        self.bus_stop_table.setHorizontalHeaderLabels(["ID", "이름", "표시명", "구간", "경유", ""])
+        self.bus_stop_table.setRowCount(0)
+        # self.bus_stop_table.itemClicked.connect(self.draw_route_preview)
+        
+        self.bus_stop_table.setColumnWidth(0, 50)
+        self.bus_stop_table.setColumnWidth(1, 200)
+        self.bus_stop_table.setColumnWidth(2, 150)
+        self.bus_stop_table.setColumnWidth(3, 50)
+        self.bus_stop_table.setColumnWidth(4, 50)
+        self.bus_stop_table.setColumnWidth(5, 20)
+        # self.bus_stop_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            
+        self.bus_stop_table.setRowCount(len(parent.bus_stops))
+        
+        self.checkbox_list = []
+        
+        for i in range(len(parent.bus_stops)):
+            checkbox = QCheckBox()
+            self.checkbox_list.append(checkbox)
+            
+        self.load_table()
+        
+        self.button_apply = QPushButton("적용")
+        self.button_apply.clicked.connect(self.apply)
+        
+        self.button_ok = QPushButton("확인")
+        self.button_ok.clicked.connect(self.ok)
+        
+        apply_layout = QHBoxLayout()
+        apply_layout.addStretch(1)
+        apply_layout.addWidget(self.button_apply)
+        apply_layout.addWidget(self.button_ok)
+        
+        layout = QVBoxLayout()
+        layout.addWidget(self.bus_stop_table)
+        layout.addLayout(apply_layout)
+        
+        self.setLayout(layout)
+    
+    def load_table(self):
+        trans_id = self.window.trans_id
+        
+        for i, stop in enumerate(self.window.bus_stops):
+            item_arsid = QTableWidgetItem(stop['arsid'])
+            item_name = QTableWidgetItem(stop['name'])
+            item_displayname = QTableWidgetItem('')
+            item_section = QTableWidgetItem('1' if i > trans_id else '0')
+            
+            pass_stop = bool(routemap.rx_pass_stop.search(stop['name']))
+            item_pass = QTableWidgetItem('경유' if pass_stop else '정차')
+            
+            self.bus_stop_table.setItem(i, 0, item_arsid)
+            self.bus_stop_table.setItem(i, 1, item_name)
+            self.bus_stop_table.setItem(i, 2, item_displayname)
+            self.bus_stop_table.setItem(i, 3, item_section)
+            self.bus_stop_table.setItem(i, 4, item_pass)
+            
+        for i in range(len(self.window.bus_stops)):
+            cell_widget = QWidget()
+            layout_checkbox = QHBoxLayout(cell_widget)
+            layout_checkbox.addWidget(self.checkbox_list[i])
+            layout_checkbox.setAlignment(Qt.AlignCenter)
+            layout_checkbox.setContentsMargins(0, 0, 0, 0)
+            cell_widget.setLayout(layout_checkbox)
+            
+            self.bus_stop_table.setCellWidget(i, 5, cell_widget)
+        
+        for stop in self.window.render_bus_stop_list:
+            self.checkbox_list[stop['ord']].setChecked(True)
+            
+            item_displayname = QTableWidgetItem(stop['name'])
+            item_section = QTableWidgetItem(str(stop['section']))
+            
+            self.bus_stop_table.setItem(stop['ord'], 2, item_displayname)
+            self.bus_stop_table.setItem(stop['ord'], 3, item_section)
+    
+    def apply(self):
+        bus_stop_list = []
+        new_trans_id = 0
+        
+        for i in range(len(self.window.bus_stops)):
+            try:
+                section = int(self.bus_stop_table.item(i, 3).text())
+            except ValueError:
+                section = 0 if new_trans_id == 0 else 1
+            
+            if self.checkbox_list[i].isChecked():
+                name = self.bus_stop_table.item(i, 1).text()
+                display_name = self.bus_stop_table.item(i, 2).text()
+                pass_stop = bool(self.bus_stop_table.item(i, 4).text() == '경유')
+                
+                if display_name:
+                    name = display_name
+                
+                pos = routemap.convert_pos(self.window.bus_stops[i]['pos'])
+                bus_stop_list.append({'ord': i, 'pos': pos, 'name': name, 'section': section, 'pass': pass_stop})
+            
+            if section == 1 and new_trans_id == 0:
+                new_trans_id = i - 1
+        
+        self.window.render_bus_stop_list = bus_stop_list
+        self.window.trans_id = new_trans_id
+        
+        self.load_table()
+        self.window.refresh_preview()
+    
+    def ok(self):
+        self.apply()
+        self.close()
+
 class RenderWindow(QWidget):
     def __init__(self, parent, route_info, bus_stops, points):
         super().__init__()
@@ -122,6 +249,7 @@ class RenderWindow(QWidget):
         self.key = parent.key
         
         self.svg_map = None
+        self.render_bus_stop_list = None
         
         self.setWindowTitle("{}".format(route_info['name']))
         
@@ -138,18 +266,25 @@ class RenderWindow(QWidget):
         theme_button_layout.addWidget(self.button_light_theme)
         theme_button_layout.addWidget(self.button_dark_theme)
         
-        group_oneway = QGroupBox("노선 형태")
-        self.button_oneway_yes = QRadioButton("편방향", group_oneway)
-        self.button_oneway_no = QRadioButton("양방향", group_oneway)
+        group_route_edit = QGroupBox("노선 형태")
+        self.button_oneway_yes = QRadioButton("편방향", group_route_edit)
+        self.button_oneway_no = QRadioButton("양방향", group_route_edit)
         
         if routemap.distance(points[0], points[-1]) > 50:
             self.button_oneway_yes.setChecked(True)
         else:
             self.button_oneway_no.setChecked(True)
         
-        oneway_button_layout = QHBoxLayout(group_oneway)
+        oneway_button_layout = QHBoxLayout()
         oneway_button_layout.addWidget(self.button_oneway_yes)
         oneway_button_layout.addWidget(self.button_oneway_no)
+        
+        self.button_edit_stops = QPushButton("정류장 목록 편집")
+        self.button_edit_stops.clicked.connect(self.open_bus_stop_edit_window)
+        
+        route_edit_layout = QVBoxLayout(group_route_edit)
+        route_edit_layout.addLayout(oneway_button_layout)
+        route_edit_layout.addWidget(self.button_edit_stops)
         
         group_etc = QGroupBox("기타")
         self.checkbox_background_map = QCheckBox("배경 지도 사용", group_etc)
@@ -176,7 +311,7 @@ class RenderWindow(QWidget):
 
         self.settings_layout = QVBoxLayout()
         self.settings_layout.addWidget(group_theme)
-        self.settings_layout.addWidget(group_oneway)
+        self.settings_layout.addWidget(group_route_edit)
         self.settings_layout.addWidget(group_etc)
         self.settings_layout.addStretch(1)
         self.settings_layout.addLayout(execute_layout)
@@ -215,6 +350,10 @@ class RenderWindow(QWidget):
     def handle_result_status(self, value):
         self.overwrite_result = value
     
+    def open_bus_stop_edit_window(self):
+        self.edit_window = BusStopEditWindow(self)
+        self.edit_window.show()
+    
     def render(self, draw_background_map = False):
         theme = 'light' if self.button_light_theme.isChecked() else 'dark'
         is_one_way = self.button_oneway_yes.isChecked()
@@ -231,7 +370,13 @@ class RenderWindow(QWidget):
         size_factor = route_size[0] / 640
         min_interval = 60 * size_factor
         
-        self.svg_map = self.bus_routemap.render(size_factor, min_interval, theme = theme)
+        if self.render_bus_stop_list == None:
+            self.render_bus_stop_list = self.bus_routemap.parse_bus_stops(min_interval)
+            self.trans_id = self.bus_routemap.trans_id
+        else:
+            self.bus_routemap.update_trans_id(self.trans_id)
+        
+        self.svg_map = self.bus_routemap.render(size_factor, min_interval, bus_stops = self.render_bus_stop_list, theme = theme)
         
         self.bus_routemap.mapframe.extend(size_factor * 30)
         
@@ -300,6 +445,9 @@ class RenderWindow(QWidget):
         
         self.render(self.checkbox_background_map.isChecked())
         
+        width = self.bus_routemap.mapframe.width()
+        height = self.bus_routemap.mapframe.height()
+        
         if self.button_light_theme.isChecked():
             page_color = '#ffffff'
         else:
@@ -307,7 +455,7 @@ class RenderWindow(QWidget):
         
         with open(filename, mode='w+', encoding='utf-8') as f:
             f.write('<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n')
-            f.write('<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"><style></style>\n')
+            f.write('<svg width="{0}" height="{1}" viewBox="0 0 {0} {1}" xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"><style></style>\n'.format(width, height))
             f.write('<sodipodi:namedview id="namedview1" pagecolor="{}" bordercolor="#cccccc" borderopacity="1" inkscape:deskcolor="#e5e5e5"/>'.format(page_color))
             f.write('<g transform="translate({}, {})">\n'.format(-self.bus_routemap.mapframe.left, -self.bus_routemap.mapframe.top))
             f.write(self.svg_map)
@@ -513,6 +661,9 @@ class MainWindow(QMainWindow):
     def bus_route_finished(self, result_json):
         result = json.loads(result_json)
         
+        self.result_table.setEnabled(True)
+        self.execute_button.setEnabled(True)
+        
         if result['error'] != None:
             self.status_label.setText(result['error'])
             self.svg_widget.load(QByteArray())
@@ -528,9 +679,6 @@ class MainWindow(QMainWindow):
             self.preview_points.append(routemap.convert_pos(pos))
         
         self.render_preview_routemap()
-        
-        self.result_table.setEnabled(True)
-        self.execute_button.setEnabled(True)
     
     def open_render_window(self):
         self.render_window = RenderWindow(self, self.route_info, self.bus_stops, self.preview_points)
