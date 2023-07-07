@@ -108,7 +108,7 @@ def main():
         if input_one_way == 'Y':
             is_one_way = True
     
-    routemap = RouteMap(route_info, bus_stops, points, is_one_way = is_one_way)
+    routemap = RouteMap(route_info, bus_stops, points, is_one_way = is_one_way, theme = args.style)
     
     route_size = routemap.mapframe.size()
     
@@ -120,7 +120,7 @@ def main():
     size_factor = route_size[0] / 640
     min_interval = 60 * size_factor
     
-    svg = routemap.render(size_factor, min_interval, theme = args.style)
+    svg = routemap.render(size_factor, min_interval)
     
     routemap.mapframe.extend(10)
     

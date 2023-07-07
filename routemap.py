@@ -6,7 +6,7 @@ origin_tile = (3490, 1584)
 rx_pass_stop = re.compile('\((경유|가상)\)$')
 rx_centerstop = re.compile('\(중\)$')
 
-svg_depot_icon = '<g id="bus_depot" transform="translate({0:.2f}, {1:.2f}) scale({2:.2f}, {2:.2f}), rotate({3:.2f})"><circle style="fill:{4};fill-opacity:1;stroke:nonel" cx="0" cy="0" r="5.8" /> <path style="fill:#ffffff;fill-opacity:1;stroke:none" d="m 0,0 c -0.19263,0 -0.3856,0.073 -0.5332,0.2207 -0.2952,0.2952 -0.2952,0.7712 0,1.0664 l 1.00976,1.0097 h -4.10742 c -0.41747,0 -0.75195,0.3365 -0.75195,0.7539 0,0.4175 0.33448,0.7539 0.75195,0.7539 h 4.11719 l -1.05469,1.0547 c -0.2952,0.2952 -0.2952,0.7712 0,1.0664 0.2952,0.2952 0.77121,0.2952 1.06641,0 l 2.25586,-2.2539 c 0.0305,-0.022 0.0603,-0.049 0.0879,-0.076 0.16605,-0.1661 0.23755,-0.3876 0.21679,-0.6036 -6.2e-4,-0.01 -10e-4,-0.013 -0.002,-0.019 -0.002,-0.018 -0.005,-0.035 -0.008,-0.053 -3.9e-4,0 -0.002,0 -0.002,-0.01 -0.0347,-0.1908 -0.14003,-0.3555 -0.28907,-0.4668 l -2.22461,-2.2265 c -0.1476,-0.1476 -0.34057,-0.2207 -0.5332,-0.2207 z" transform="translate(0.6,-3)" /></g>'
+svg_depot_icon = '<g id="bus_depot" transform="translate(18, 18) scale(2.8, 2.8) rotate({0:.2f})"><circle style="fill:{1};fill-opacity:1;stroke:nonel" cx="0" cy="0" r="5.8" /> <path style="fill:#ffffff;fill-opacity:1;stroke:none" d="m 0,0 c -0.19263,0 -0.3856,0.073 -0.5332,0.2207 -0.2952,0.2952 -0.2952,0.7712 0,1.0664 l 1.00976,1.0097 h -4.10742 c -0.41747,0 -0.75195,0.3365 -0.75195,0.7539 0,0.4175 0.33448,0.7539 0.75195,0.7539 h 4.11719 l -1.05469,1.0547 c -0.2952,0.2952 -0.2952,0.7712 0,1.0664 0.2952,0.2952 0.77121,0.2952 1.06641,0 l 2.25586,-2.2539 c 0.0305,-0.022 0.0603,-0.049 0.0879,-0.076 0.16605,-0.1661 0.23755,-0.3876 0.21679,-0.6036 -6.2e-4,-0.01 -10e-4,-0.013 -0.002,-0.019 -0.002,-0.018 -0.005,-0.035 -0.008,-0.053 -3.9e-4,0 -0.002,0 -0.002,-0.01 -0.0347,-0.1908 -0.14003,-0.3555 -0.28907,-0.4668 l -2.22461,-2.2265 c -0.1476,-0.1476 -0.34057,-0.2207 -0.5332,-0.2207 z" transform="translate(0.6,-3)" /></g>'
 
 class Mapframe():
     def __init__(self, left, top, right, bottom):
@@ -283,7 +283,7 @@ def get_bus_color(route_info):
     return (line_color, line_dark_color)
 
 class RouteMap():
-    def __init__(self, route_info, bus_stops, points, is_one_way = False):
+    def __init__(self, route_info, bus_stops, points, is_one_way = False, theme = 'light'):
         self.route_info = route_info
         self.bus_stops = bus_stops
         self.points = points
@@ -292,15 +292,12 @@ class RouteMap():
         self.mapframe = Mapframe.from_points(self.points)
         
         self.update_trans_id(self.get_trans_id())
+        self.line_color, self.line_dark_color = get_bus_color(self.route_info)
+        self.theme = theme
 
     def get_trans_id(self):
         for i, stop in enumerate(self.bus_stops):
-            if self.is_one_way:
-                is_trans = i == len(self.bus_stops) - 1
-            else:
-                is_trans = bool(stop['is_trans'])
-            
-            if is_trans:
+            if stop['is_trans']:
                 return i
         
         return None
@@ -319,15 +316,18 @@ class RouteMap():
         main_stop_list = []
         minor_stop_list = []
         
+        last_stop_id = len(self.bus_stops) - 1 if self.is_one_way else self.trans_id
+        
         # 기종점 처리
-        for i in [0, self.trans_id]:
+        for i in [0, last_stop_id]:
             name, is_main = get_bus_stop_name(self.bus_stops[i])
             bus_stop_name_list.append(name)
             
             pos = convert_pos(self.bus_stops[i]['pos'])
             pass_stop = bool(rx_pass_stop.search(self.bus_stops[i]['name']))
+            section = 1 if i > self.trans_id else 0
             
-            main_stop_list.append({'ord': i, 'pos': pos, 'name': name, 'section': 0, 'pass': pass_stop})
+            main_stop_list.append({'ord': i, 'pos': pos, 'name': name, 'section': section, 'pass': pass_stop})
         
         # 주요 정류장 처리
         for i in range(len(self.bus_stops)):
@@ -341,7 +341,7 @@ class RouteMap():
             pass_stop = bool(rx_pass_stop.search(self.bus_stops[i]['name']))
             section = 1 if i > self.trans_id else 0
             
-            if i > self.trans_id:
+            if section == 1:
                 min_path_dist = min_distance_from_segments(pos, self.points[:self.t_point])
                 if min_path_dist < min_interval / 8:
                     section = 0
@@ -409,11 +409,33 @@ class RouteMap():
         
         return svg_text
 
-    def draw_bus_stop(self, stop, size_factor, stop_type = 0):
-        stop_circle_style = ((self.style_fill_gray if stop['pass'] else self.style_fill_circle) if self.route_info['name'][0] != 'N' else self.style_fill_yellow) + (self.style_circle if stop['section'] == 0 else self.style_circle_dark)
+    def draw_bus_stop_circle(self, stop, size_factor):
+        style_circle_base = "opacity:1;fill-opacity:1;stroke-width:{};stroke-dasharray:none;stroke-opacity:1;".format(3.2 * size_factor)
+        if self.theme == 'light':
+            style_fill_circle = "fill:#ffffff;"
+        elif self.theme == 'dark':
+            style_fill_circle = "fill:#282828;"
+        style_fill_gray = "fill:#cccccc;"
+        style_fill_yellow = "fill:#ffcc00;"
+        style_circle = "stroke:{};".format(self.line_color) + style_circle_base
+        style_circle_dark = "stroke:{};".format(self.line_dark_color) + style_circle_base
+        
+        section = 0 if stop['section'] == 0 or self.is_one_way else 1
+        
+        stop_circle_style = ((style_fill_gray if stop['pass'] else style_fill_circle) if self.route_info['name'][0] != 'N' else style_fill_yellow) + (style_circle if section == 0 else style_circle_dark)
         svg_circle = '<circle style="{}" cx="{}" cy="{}" r="{}" />\n'.format(stop_circle_style, stop['pos'][0], stop['pos'][1], 6 * size_factor)
         
-        if stop['section'] == 0:
+        return svg_circle
+    
+    def draw_bus_stop_text(self, stop, size_factor, direction = -1):
+        style_fill_white = "fill:#ffffff;"
+        style_fill_gray = "fill:#cccccc;"
+        style_fill_yellow = "fill:#ffcc00;"
+        style_text = "font-size:30px;line-height:1.0;font-family:'KoPubDotum Bold';text-align:start;letter-spacing:0px;word-spacing:0px;fill-opacity:1;"
+        
+        section = 0 if stop['section'] == 0 or self.is_one_way else 1
+        
+        if section == 0:
             stop_p = find_nearest_point(stop['pos'], self.points[:self.t_point])
         else:
             stop_p = find_nearest_point(stop['pos'], self.points[self.t_point:]) + self.t_point
@@ -433,7 +455,7 @@ class RouteMap():
         normal_dir = (normal_dir[0] / dir_factor, normal_dir[1] / dir_factor)
         
         # 정류장 명칭 박스 위치 설정
-        text_size_factor = size_factor * (0.7 if stop_type == 0 else 0.56)
+        text_size_factor = size_factor * 0.56
         text_height = 30 * text_size_factor
         
         match = rx_pass_stop.search(stop['name'])
@@ -455,23 +477,31 @@ class RouteMap():
         if normal_dir[1] < 0:
             normal_dir = (-normal_dir[0], -normal_dir[1])
         
-        text_pos_up = (stop['pos'][0] + 20 * normal_dir[0] * size_factor - text_width * text_size_factor / 2, stop['pos'][1] + 20 * normal_dir[1] * size_factor - text_height / 2)
+        text_pos_up = (stop['pos'][0] + 20 * normal_dir[0] * size_factor - text_width * text_size_factor / 2, stop['pos'][1] + 25 * normal_dir[1] * size_factor - text_height / 2)
         text_rect_up = (text_pos_up[0], text_pos_up[1], text_width * text_size_factor, text_height)
         
-        text_pos_down = (stop['pos'][0] - 20 * normal_dir[0] * size_factor - text_width * text_size_factor / 2, stop['pos'][1] - 20 * normal_dir[1] * size_factor - text_height / 2)
+        text_pos_down = (stop['pos'][0] - 20 * normal_dir[0] * size_factor - text_width * text_size_factor / 2, stop['pos'][1] - 25 * normal_dir[1] * size_factor - text_height / 2)
         text_rect_down = (text_pos_down[0], text_pos_down[1], text_width * text_size_factor, text_height)
         
         text_pos_list = [text_pos_up, text_pos_down, text_pos_left, text_pos_right]
         text_rect_list = [text_rect_up, text_rect_down, text_rect_left, text_rect_right]
-        collisions = [get_collision_score(x, self.text_rects, self.points) for x in text_rect_list]
-        min_col = 0
         
-        for i in range(1, len(collisions)):
-            if collisions[min_col] >= collisions[i]:
-                min_col = i
-        
-        text_pos = text_pos_list[min_col]
-        text_rect = text_rect_list[min_col]
+        if direction == -1:
+            collisions = [get_collision_score(x, self.text_rects, self.points) for x in text_rect_list]
+            direction = 0
+            
+            for i in range(1, len(collisions)):
+                if collisions[direction] >= collisions[i]:
+                    direction = i
+            
+            text_pos = text_pos_list[direction]
+            text_rect = text_rect_list[direction]
+        else:
+            if direction >= len(text_rect_list) or direction < 0:
+                raise IndexError()
+            
+            text_pos = text_pos_list[direction]
+            text_rect = text_rect_list[direction]
         
         self.text_rects.append(text_rect)
             
@@ -479,35 +509,45 @@ class RouteMap():
         if stop_name_suffix:
             stop_name_svg += '<tspan style="font-size:24px">{}</tspan>'.format(stop_name_suffix)
         
-        svg_text = '<rect style="fill:{};fill-opacity:1;stroke:none;" width="{:.2f}" height="36" x="0" y="0" ry="18" />'.format(self.line_color if stop['section'] == 0 else self.line_dark_color, text_width)
-        svg_text += '<text style="{}" text-anchor="middle" x="{:.2f}" y="28">{}</text>\n'.format(self.style_text + (self.style_fill_gray if stop['pass'] else self.style_fill_white), text_width / 2, stop_name_svg)
-        svg_text = '<g id="stop{3}" transform="translate({0:.2f}, {1:.2f}) scale({2:.2f}, {2:.2f})">'.format(text_pos[0], text_pos[1], text_size_factor, stop['ord']) + svg_text + '</g>'
-        
-        self.mapframe.update_rect(text_rect)
+        svg_text = ''
+        text_offset = 0
         
         # 기점 표시
         if stop['ord'] == 0:
             dir_len = math.sqrt(path_dir[0] ** 2 + path_dir[1] ** 2)
-            
             if dir_len == 0:
                 dir_cos = 1
             else:
                 dir_cos = path_dir[0] / dir_len
             
             dir_deg = math.acos(dir_cos) / math.pi * 180
-            
             if path_dir[1] < 0:
                 dir_deg = 360 - dir_deg
                 
-            svg_text += svg_depot_icon.format(stop['pos'][0] + 20 * normal_dir[0] * size_factor, stop['pos'][1] + 20 * normal_dir[1] * size_factor, size_factor * 1.5, dir_deg, self.line_color) + '\n'
+            svg_text += svg_depot_icon.format(dir_deg, self.line_color) + '\n'
+            text_offset = 40
+        
+        svg_text += '<rect style="fill:{};fill-opacity:1;stroke:none;" width="{:.2f}" height="36" x="{:.2f}" y="0" ry="18" />'.format(self.line_color if section == 0 else self.line_dark_color, text_width, text_offset)
+        svg_text += '<text style="{}" text-anchor="middle" x="{:.2f}" y="28">{}</text>\n'.format(style_text + (style_fill_gray if stop['pass'] else style_fill_white), text_width / 2 + text_offset, stop_name_svg)
+        
+        svg_text = '<g id="stop{3}" transform="translate({0:.2f}, {1:.2f}) scale({2:.2f}, {2:.2f})">'.format(text_pos[0], text_pos[1], text_size_factor, stop['ord']) + svg_text + '</g>'
+        
+        self.mapframe.update_rect(text_rect)
             
-        return svg_circle + svg_text
+        return svg_text
     
     def render_path(self, size_factor):
         # 노선 경로 렌더링
+        style_path_base = "display:inline;fill:none;stroke-width:{};stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1".format(8 * size_factor)
+        style_path = "stroke:{};".format(self.line_color) + style_path_base
+        style_path_dark = "stroke:{};".format(self.line_dark_color) + style_path_base
+        
         path_points = []
         
-        path_points.append(self.points[:self.t_point+1])
+        start_point = find_nearest_point(convert_pos(self.bus_stops[0]['pos']), self.points[:self.t_point])
+        end_point = find_nearest_point(convert_pos(self.bus_stops[-1]['pos']), self.points[self.t_point:]) + self.t_point
+        
+        path_points.append(self.points[start_point:self.t_point+1])
         
         if self.route_info['type'] <= 10:
             # skip = 2
@@ -521,64 +561,40 @@ class RouteMap():
         segment_start = 0
         segment_end = -1
         
-        for i in range(self.t_point, len(self.points)):
+        for i in range(self.t_point, end_point):
             min_dist = min_distance_from_segments(self.points[i], path_points[0])
-            if min_dist > skip_threshold and i < len(self.points) - 1:
+            if min_dist > skip_threshold and i < end_point - 1:
                 if segment_end < 0:
                     segment_start = i
                 segment_end = i
             elif segment_end >= 0:
                 path_segment = get_point_segment(self.points, segment_start, segment_end, skip_threshold * 2)
-                path_points.append(self.points[path_segment[0]:min(path_segment[1]+1, len(self.points))])
+                path_points.append(self.points[path_segment[0]:min(path_segment[1]+1, end_point)])
                 segment_end = -1
         
         svg_path = ''
         
         for i, path in enumerate(path_points):
             if i == 0 or self.is_one_way:
-                path_style = self.style_path
+                path_style = style_path
             else:
-                path_style = self.style_path_dark
+                path_style = style_path_dark
             
             svg_path = make_svg_path(path_style, path) + svg_path
         
         return svg_path
     
-    def render(self, size_factor, min_interval, bus_stops = None, theme = 'light'):
-        style_path_base = "display:inline;fill:none;stroke-width:{};stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1".format(8 * size_factor)
-        style_circle_base = "opacity:1;fill-opacity:1;stroke-width:{};stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;paint-order:normal".format(3.2 * size_factor)
-    
-        self.style_text = "font-size:30px;line-height:1.0;font-family:'KoPubDotum Bold';text-align:start;letter-spacing:0px;word-spacing:0px;fill-opacity:1;"
-    
-        self.line_color, self.line_dark_color = get_bus_color(self.route_info)
-        
-        self.style_path = "stroke:{};".format(self.line_color) + style_path_base
-        self.style_path_dark = "stroke:{};".format(self.line_dark_color) + style_path_base
-        
-        self.style_circle = "stroke:{};".format(self.line_color) + style_circle_base
-        self.style_circle_dark = "stroke:{};".format(self.line_dark_color) + style_circle_base
-        
-        self.style_fill_white = "fill:#ffffff;"
-        self.style_fill_gray = "fill:#cccccc;"
-        self.style_fill_yellow = "fill:#ffcc00;"
-        
-        if theme == 'light':
-            self.style_fill_circle = "fill:#ffffff;"
-        elif theme == 'dark':
-            self.style_fill_circle = "fill:#282828;"
-        else:
-            raise ValueError("Unsupported theme: {}".format(theme))
-        
-        if bus_stops == None:
-            bus_stops = self.parse_bus_stops(min_interval)
+    def render_init(self):
         self.text_rects = []
+    
+    def render(self, size_factor, min_interval):
+        self.render_init()
+        svg = self.render_path(size_factor)
         
-        svg = ''
-        
+        bus_stops = self.parse_bus_stops(min_interval)
         for stop in bus_stops:
-            svg += self.draw_bus_stop(stop, size_factor, 1)
-        
-        svg = self.render_path(size_factor) + svg
+            svg += self.draw_bus_stop_circle(stop, size_factor)
+            svg += self.draw_bus_stop_text(stop, size_factor)
         svg += self.draw_bus_info(size_factor * 0.75) + '\n'
         
         return svg

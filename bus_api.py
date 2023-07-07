@@ -271,7 +271,7 @@ def get_busan_bus_route(route_name):
     params = {'busLineId': route_name}
     encoded_params = urllib.parse.urlencode(params, encoding='cp949')
     
-    route_api_res = requests.get('http://bus.busan.go.kr/busanBIMS/Ajax/busLineCoordList.asp?' + encoded_params, timeout = 20).text
+    route_api_res = requests.get('http://bus.busan.go.kr/busanBIMS/Ajax/busLineCoordList.asp?' + encoded_params, timeout = 5).text
     route_api_tree = elemtree.fromstring(route_api_res)
     xml_route_positions = route_api_tree.findall('./coord')
     
@@ -328,7 +328,7 @@ def search_gyeonggi_bus_info(key, number):
     try:
         params = {'serviceKey': key, 'keyword': number}
         
-        list_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteList', params = params, timeout = 20).text
+        list_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteList', params = params, timeout = 5).text
         list_api_tree = elemtree.fromstring(list_api_res)
         
         api_common_err = list_api_tree.find('./cmmMsgHeader/returnAuthMsg')

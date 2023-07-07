@@ -1,9 +1,9 @@
 import os, sys, json, requests, threading
-from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QAbstractItemView, QPushButton, QGroupBox, QRadioButton, QSpacerItem, QCheckBox, QProgressBar, QMessageBox, QGridLayout
+from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QAbstractItemView, QPushButton, QGroupBox, QRadioButton, QSpacerItem, QCheckBox, QProgressBar, QMessageBox, QGridLayout, QSlider
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtCore import QByteArray, Qt, QBasicTimer, QObject, QEventLoop, Signal, Slot
-from PySide6.QtGui import QIcon, QTextDocument, QTextOption
+from PySide6.QtGui import QIcon, QTextDocument, QTextOption, QIntValidator
 import bus_api, routemap
 
 def resource_path(relative_path):
@@ -108,6 +108,63 @@ class OverwriteWindow(QWidget):
         self.result_signal.emit(0)
         self.close()
 
+class BusInfoEditWindow(QWidget):
+    def __init__(self, parent):
+        super().__init__()
+        
+        self.window = parent
+        
+        self.setWindowTitle(" ")
+        
+        icon = QIcon(resource_path("resources/icon.ico"))
+        self.setWindowIcon(icon)
+        
+        self.setFixedSize(240, 120)
+        
+        bus_info_layout = QGridLayout()
+        
+        self.name_input = QLineEdit()
+        self.start_input = QLineEdit()
+        self.end_input = QLineEdit()
+        
+        self.name_input.setText(self.window.route_info['name'])
+        self.start_input.setText(self.window.route_info['start'])
+        self.end_input.setText(self.window.route_info['end'])
+        
+        self.name_input.returnPressed.connect(self.ok)
+        self.start_input.returnPressed.connect(self.ok)
+        self.end_input.returnPressed.connect(self.ok)
+        
+        bus_info_layout.addWidget(QLabel("노선명: "), 0, 0)
+        bus_info_layout.addWidget(self.name_input, 0, 1)
+        
+        bus_info_layout.addWidget(QLabel("기점: "), 1, 0)
+        bus_info_layout.addWidget(self.start_input, 1, 1)
+        bus_info_layout.addWidget(QLabel("종점: "), 2, 0)
+        bus_info_layout.addWidget(self.end_input, 2, 1)
+        
+        self.button_ok = QPushButton("확인")
+        self.button_ok.clicked.connect(self.ok)
+        
+        apply_layout = QHBoxLayout()
+        apply_layout.addStretch(1)
+        apply_layout.addWidget(self.button_ok)
+        
+        layout = QVBoxLayout()
+        layout.addLayout(bus_info_layout)
+        layout.addStretch(1)
+        layout.addLayout(apply_layout)
+        
+        self.setLayout(layout)
+    
+    def ok(self):
+        self.window.route_info['name'] = self.name_input.text()
+        self.window.route_info['start'] = self.start_input.text()
+        self.window.route_info['end'] = self.end_input.text()
+        
+        self.window.refresh_preview()
+        self.close()
+
 class BusStopEditWindow(QWidget):
     def __init__(self, parent):
         super().__init__()
@@ -119,25 +176,23 @@ class BusStopEditWindow(QWidget):
         icon = QIcon(resource_path("resources/icon.ico"))
         self.setWindowIcon(icon)
         
-        self.setFixedSize(600, 400)
+        self.setFixedSize(640, 400)
 
         self.bus_stop_table = QTableWidget()
         self.bus_stop_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.bus_stop_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.bus_stop_table.setColumnCount(6)
-        self.bus_stop_table.setHorizontalHeaderLabels(["ID", "이름", "표시명", "구간", "경유", ""])
+        self.bus_stop_table.setColumnCount(7)
+        self.bus_stop_table.setHorizontalHeaderLabels(["ID", "이름", "표시명", "구간", "경유", "위치", ""])
         self.bus_stop_table.setRowCount(0)
         # self.bus_stop_table.itemClicked.connect(self.draw_route_preview)
         
-        self.bus_stop_table.setColumnWidth(0, 50)
+        self.bus_stop_table.setColumnWidth(0, 45)
         self.bus_stop_table.setColumnWidth(1, 200)
         self.bus_stop_table.setColumnWidth(2, 150)
-        self.bus_stop_table.setColumnWidth(3, 50)
-        self.bus_stop_table.setColumnWidth(4, 50)
-        self.bus_stop_table.setColumnWidth(5, 20)
-        # self.bus_stop_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-            
-        self.bus_stop_table.setRowCount(len(parent.bus_stops))
+        self.bus_stop_table.setColumnWidth(3, 45)
+        self.bus_stop_table.setColumnWidth(4, 45)
+        self.bus_stop_table.setColumnWidth(5, 45)
+        self.bus_stop_table.setColumnWidth(6, 20)
         
         self.checkbox_list = []
         
@@ -146,6 +201,7 @@ class BusStopEditWindow(QWidget):
             self.checkbox_list.append(checkbox)
             
         self.load_table()
+        self.bus_stop_table.itemChanged.connect(self.validate_table)
         
         self.button_apply = QPushButton("적용")
         self.button_apply.clicked.connect(self.apply)
@@ -166,6 +222,7 @@ class BusStopEditWindow(QWidget):
     
     def load_table(self):
         trans_id = self.window.trans_id
+        self.bus_stop_table.setRowCount(len(self.window.bus_stops))
         
         for i, stop in enumerate(self.window.bus_stops):
             item_arsid = QTableWidgetItem(stop['arsid'])
@@ -176,11 +233,18 @@ class BusStopEditWindow(QWidget):
             pass_stop = bool(routemap.rx_pass_stop.search(stop['name']))
             item_pass = QTableWidgetItem('경유' if pass_stop else '정차')
             
+            item_text_direction = QTableWidgetItem('-1')
+            
+            item_arsid.setFlags(item_section.flags() & ~Qt.ItemIsEditable)
+            item_name.setFlags(item_section.flags() & ~Qt.ItemIsEditable)
+            item_pass.setFlags(item_section.flags() & ~Qt.ItemIsEditable)
+            
             self.bus_stop_table.setItem(i, 0, item_arsid)
             self.bus_stop_table.setItem(i, 1, item_name)
             self.bus_stop_table.setItem(i, 2, item_displayname)
             self.bus_stop_table.setItem(i, 3, item_section)
             self.bus_stop_table.setItem(i, 4, item_pass)
+            self.bus_stop_table.setItem(i, 5, item_text_direction)
             
         for i in range(len(self.window.bus_stops)):
             cell_widget = QWidget()
@@ -190,16 +254,29 @@ class BusStopEditWindow(QWidget):
             layout_checkbox.setContentsMargins(0, 0, 0, 0)
             cell_widget.setLayout(layout_checkbox)
             
-            self.bus_stop_table.setCellWidget(i, 5, cell_widget)
+            self.bus_stop_table.setCellWidget(i, 6, cell_widget)
         
         for stop in self.window.render_bus_stop_list:
             self.checkbox_list[stop['ord']].setChecked(True)
+            section = str(stop['section'])
             
-            item_displayname = QTableWidgetItem(stop['name'])
-            item_section = QTableWidgetItem(str(stop['section']))
+            self.bus_stop_table.item(stop['ord'], 2).setText(stop['name'])
+            self.bus_stop_table.item(stop['ord'], 3).setText(section)
             
-            self.bus_stop_table.setItem(stop['ord'], 2, item_displayname)
-            self.bus_stop_table.setItem(stop['ord'], 3, item_section)
+            if 'text_dir' in stop:
+                self.bus_stop_table.item(stop['ord'], 5).setText(str(stop['text_dir']))
+            
+        self.initial_sections = [self.bus_stop_table.item(i, 3).text() for i in range(len(self.window.bus_stops))]
+    
+    def validate_table(self, item):
+        if item.column() == 3:
+            if item.text() != '0' and item.text() != '1':
+                item.setText(self.initial_sections[item.row()])
+        elif item.column() == 5:
+            try:
+                int(item.text())
+            except ValueError:
+                item.setText('-1')
     
     def apply(self):
         bus_stop_list = []
@@ -215,12 +292,16 @@ class BusStopEditWindow(QWidget):
                 name = self.bus_stop_table.item(i, 1).text()
                 display_name = self.bus_stop_table.item(i, 2).text()
                 pass_stop = bool(self.bus_stop_table.item(i, 4).text() == '경유')
+                try:
+                    text_dir = int(self.bus_stop_table.item(i, 5).text())
+                except ValueError:
+                    text_dir = -1
                 
                 if display_name:
                     name = display_name
                 
                 pos = routemap.convert_pos(self.window.bus_stops[i]['pos'])
-                bus_stop_list.append({'ord': i, 'pos': pos, 'name': name, 'section': section, 'pass': pass_stop})
+                bus_stop_list.append({'ord': i, 'pos': pos, 'name': name, 'section': section, 'pass': pass_stop, 'text_dir': text_dir})
             
             if section == 1 and new_trans_id == 0:
                 new_trans_id = i - 1
@@ -234,6 +315,37 @@ class BusStopEditWindow(QWidget):
     def ok(self):
         self.apply()
         self.close()
+
+class SizeSlider(QWidget):
+    valueChanged = Signal()
+    
+    def __init__(self):
+        super().__init__()
+        
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(50, 200)
+        self.slider.setValue(100)
+        self.slider.valueChanged.connect(self.update_label)
+        self.slider.sliderReleased.connect(self.emit_value_changed)
+        
+        self.label = QLabel(str(self.slider.value()) + '%')
+        self.label.setFixedWidth(40)
+        
+        layout = QHBoxLayout()
+        layout.addWidget(self.slider, stretch = 1)
+        layout.addWidget(self.label)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.setLayout(layout)
+    
+    def value(self):
+        return self.slider.value()
+    
+    def update_label(self):
+        self.label.setText(str(self.slider.value()) + '%')
+    
+    def emit_value_changed(self):
+        self.valueChanged.emit()
 
 class RenderWindow(QWidget):
     def __init__(self, parent, route_info, bus_stops, points):
@@ -280,11 +392,38 @@ class RenderWindow(QWidget):
         oneway_button_layout.addWidget(self.button_oneway_no)
         
         self.button_edit_stops = QPushButton("정류장 목록 편집")
-        self.button_edit_stops.clicked.connect(self.open_bus_stop_edit_window)
+        self.button_edit_stops.clicked.connect(self.bus_stop_edit_window)
+        
+        self.button_edit_info = QPushButton("버스 정보 편집")
+        self.button_edit_info.clicked.connect(self.bus_info_edit_window)
         
         route_edit_layout = QVBoxLayout(group_route_edit)
         route_edit_layout.addLayout(oneway_button_layout)
         route_edit_layout.addWidget(self.button_edit_stops)
+        route_edit_layout.addWidget(self.button_edit_info)
+        
+        group_size_slider = QGroupBox("크기")
+        slider_layout = QGridLayout(group_size_slider)
+        
+        self.size_slider = SizeSlider()
+        self.circle_size_slider = SizeSlider()
+        self.text_size_slider = SizeSlider()
+        self.info_size_slider = SizeSlider()
+        
+        self.size_slider.valueChanged.connect(self.refresh_preview)
+        self.circle_size_slider.valueChanged.connect(self.refresh_preview)
+        self.text_size_slider.valueChanged.connect(self.refresh_preview)
+        self.info_size_slider.valueChanged.connect(self.refresh_preview)
+        
+        slider_layout.addWidget(QLabel("경로: "), 0, 0)
+        slider_layout.addWidget(QLabel("정류장: "), 1, 0)
+        slider_layout.addWidget(QLabel("정류장명: "), 2, 0)
+        slider_layout.addWidget(QLabel("정보: "), 3, 0)
+        
+        slider_layout.addWidget(self.size_slider, 0, 1)
+        slider_layout.addWidget(self.circle_size_slider, 1, 1)
+        slider_layout.addWidget(self.text_size_slider, 2, 1)
+        slider_layout.addWidget(self.info_size_slider, 3, 1)
         
         group_etc = QGroupBox("기타")
         self.checkbox_background_map = QCheckBox("배경 지도 사용", group_etc)
@@ -312,6 +451,7 @@ class RenderWindow(QWidget):
         self.settings_layout = QVBoxLayout()
         self.settings_layout.addWidget(group_theme)
         self.settings_layout.addWidget(group_route_edit)
+        self.settings_layout.addWidget(group_size_slider)
         self.settings_layout.addWidget(group_etc)
         self.settings_layout.addStretch(1)
         self.settings_layout.addLayout(execute_layout)
@@ -332,7 +472,10 @@ class RenderWindow(QWidget):
         layout.addLayout(self.settings_layout)
         
         self.setLayout(layout)
-        self.setFixedSize(720, 240)
+        
+        self.minimum_width = 720
+        self.minimum_height = 440
+        self.setFixedSize(self.minimum_width, self.minimum_height)
         
         self.execute_button.clicked.connect(self.export)
         
@@ -350,15 +493,19 @@ class RenderWindow(QWidget):
     def handle_result_status(self, value):
         self.overwrite_result = value
     
-    def open_bus_stop_edit_window(self):
-        self.edit_window = BusStopEditWindow(self)
-        self.edit_window.show()
+    def bus_stop_edit_window(self):
+        self.stop_edit_window = BusStopEditWindow(self)
+        self.stop_edit_window.show()
+    
+    def bus_info_edit_window(self):
+        self.info_edit_window = BusInfoEditWindow(self)
+        self.info_edit_window.show()
     
     def render(self, draw_background_map = False):
         theme = 'light' if self.button_light_theme.isChecked() else 'dark'
         is_one_way = self.button_oneway_yes.isChecked()
     
-        self.bus_routemap = routemap.RouteMap(self.route_info, self.bus_stops, self.points, is_one_way = is_one_way)
+        self.bus_routemap = routemap.RouteMap(self.route_info, self.bus_stops, self.points, is_one_way = is_one_way, theme = theme)
         
         route_size = self.bus_routemap.mapframe.size()
         
@@ -367,8 +514,12 @@ class RenderWindow(QWidget):
         elif route_size[1] < route_size[0] / 1.5:
             route_size = (route_size[0], route_size[0] / 1.5)
         
-        size_factor = route_size[0] / 640
-        min_interval = 60 * size_factor
+        size_factor_base = route_size[0] / 640
+        route_size_factor = size_factor_base * (self.size_slider.value() / 100)
+        info_size_factor = size_factor_base * (self.info_size_slider.value() / 100) * 0.75
+        circle_size_factor = size_factor_base * (self.circle_size_slider.value() / 100)
+        text_size_factor = size_factor_base * (self.text_size_slider.value() / 100)
+        min_interval = 60 * route_size_factor
         
         if self.render_bus_stop_list == None:
             self.render_bus_stop_list = self.bus_routemap.parse_bus_stops(min_interval)
@@ -376,9 +527,20 @@ class RenderWindow(QWidget):
         else:
             self.bus_routemap.update_trans_id(self.trans_id)
         
-        self.svg_map = self.bus_routemap.render(size_factor, min_interval, bus_stops = self.render_bus_stop_list, theme = theme)
+        # 노선도 렌더링
+        self.bus_routemap.render_init()
         
-        self.bus_routemap.mapframe.extend(size_factor * 30)
+        self.svg_map = self.bus_routemap.render_path(route_size_factor)
+        for stop in self.render_bus_stop_list:
+            self.svg_map += self.bus_routemap.draw_bus_stop_circle(stop, circle_size_factor)
+            
+            if 'text_dir' in stop:
+                self.svg_map += self.bus_routemap.draw_bus_stop_text(stop, text_size_factor, stop['text_dir'])
+            else:
+                self.svg_map += self.bus_routemap.draw_bus_stop_text(stop, text_size_factor)
+        self.svg_map += self.bus_routemap.draw_bus_info(info_size_factor) + '\n'
+        
+        self.bus_routemap.mapframe.extend(size_factor_base * 30)
         
         if theme == 'light':
             mapbox_style = 'kiwitree/clinp1vgh002t01q4c2366q3o'
@@ -409,17 +571,23 @@ class RenderWindow(QWidget):
         svg += self.svg_map
         svg += '</g></svg>'
         
-        widget_width = self.svg_container.width()
-        widget_height = self.svg_container.width() / width * height
+        if height > width:
+            widget_width = self.svg_container.width()
+            widget_height = self.svg_container.width() / width * height
+        else:
+            widget_width = self.svg_container.height() * width / height
+            widget_height = self.svg_container.height()
         
         self.svg_widget.load(QByteArray(svg.encode()))
         self.svg_widget.resize(widget_width, widget_height)
         
-        if widget_height > self.svg_container.height():
-            window_width = self.width()
-            window_height = self.height()
-            
-            self.setFixedSize(window_width, window_height + (widget_height - self.svg_container.height()))
+        window_width = self.width()
+        window_height = self.height()
+        
+        if width > height:
+            self.setFixedSize(max(self.minimum_width, window_width + (widget_width - self.svg_container.width())), window_height)
+        else:
+            self.setFixedSize(window_width, max(self.minimum_height, window_height + (widget_height - self.svg_container.height())))
     
     def export(self):
         filename = self.filename_input.text()
