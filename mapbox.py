@@ -7,6 +7,17 @@ properties = {}
 
 sprite_cache = {}
 
+class MapBoxError(Exception):
+    pass
+
+def check_token_valid(token):
+    response = requests.get(style_url.format(''), params = {'access_token': token})
+    if response.status_code == 401:
+        return False
+    else:
+        return True
+    
+
 def resource_path(relative_path):
     base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)
@@ -352,6 +363,10 @@ def load_tile(style_id, token, x, y, zoom, draw_full_svg = True, clip_mask = Tru
     # Load styles
     style_response = requests.get(style_url.format(style_id), params = {'access_token': token})
     styles = style_response.json()
+    
+    if style_response.status_code != 200:
+        if 'message' in styles:
+            raise MapBoxError(styles['message'])
     
     # Get tileset sources
     if re.match(r'mapbox://', styles['sources']['composite']['url']) and styles['sources']['composite']['type'] == 'vector':

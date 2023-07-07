@@ -4,7 +4,7 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtCore import QByteArray, Qt, QBasicTimer, QObject, QEventLoop, Signal, Slot
 from PySide6.QtGui import QIcon, QTextDocument, QTextOption, QIntValidator
-import bus_api, routemap
+import bus_api, routemap, mapbox
 
 def resource_path(relative_path):
     base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
@@ -60,24 +60,59 @@ class BusRouteThread(QObject):
         
         result_json = json.dumps({'result': {'route_positions': route_positions, 'route_info': route_info, 'bus_stops': bus_stops}, 'error': error})
         self.thread_finished.emit(result_json)
-        
-class OverwriteWindow(QWidget):
-    result_signal = Signal(int)
+
+class OkDialog(QWidget):
+    result_signal = Signal()
     
-    def __init__(self, parent, filename):
+    def __init__(self, parent, title, text):
         super().__init__()
         
-        self.setWindowTitle(" ")
+        self.setWindowTitle(title)
         self.setWindowModality(Qt.ApplicationModal)
         
         icon = QIcon(resource_path("resources/icon.ico"))
         self.setWindowIcon(icon)
         
-        self.text_label = QLabel('<p style="margin-bottom: 10px"><b>이름이 "{}"인 파일이 이미 존재합니다.</p><p>덮어쓰시겠습니까?</p>'.format(filename))
+        self.text_label = QLabel(text)
         
         self.text_label.setTextFormat(Qt.RichText)
         
-        self.yes_button = QPushButton("덮어쓰기")
+        self.yes_button = QPushButton("확인")
+        
+        self.yes_button.clicked.connect(self.click_yes)
+        
+        button_layout = QHBoxLayout()
+        button_layout.addStretch(1)
+        button_layout.addWidget(self.yes_button)
+        
+        layout = QVBoxLayout()
+        layout.addWidget(self.text_label)
+        layout.addLayout(button_layout)
+        
+        self.setLayout(layout)
+        self.setFixedSize(320, 100)
+    
+    def click_yes(self):
+        self.result_signal.emit()
+        self.close()
+
+class OkCancelDialog(QWidget):
+    result_signal = Signal(int)
+    
+    def __init__(self, parent, title, text):
+        super().__init__()
+        
+        self.setWindowTitle(title)
+        self.setWindowModality(Qt.ApplicationModal)
+        
+        icon = QIcon(resource_path("resources/icon.ico"))
+        self.setWindowIcon(icon)
+        
+        self.text_label = QLabel(text)
+        
+        self.text_label.setTextFormat(Qt.RichText)
+        
+        self.yes_button = QPushButton("확인")
         self.no_button = QPushButton("취소")
         
         self.yes_button.clicked.connect(self.click_yes)
@@ -348,6 +383,8 @@ class SizeSlider(QWidget):
         self.valueChanged.emit()
 
 class RenderWindow(QWidget):
+    render_error = Signal(str)
+    
     def __init__(self, parent, route_info, bus_stops, points):
         super().__init__()
         
@@ -428,7 +465,7 @@ class RenderWindow(QWidget):
         group_etc = QGroupBox("기타")
         self.checkbox_background_map = QCheckBox("배경 지도 사용", group_etc)
         
-        if not self.mapbox_key:
+        if not self.parent_widget.mapbox_key_valid:
             self.checkbox_background_map.setEnabled(False)
             self.checkbox_background_map.setChecked(False)
         else:
@@ -501,7 +538,7 @@ class RenderWindow(QWidget):
         self.info_edit_window = BusInfoEditWindow(self)
         self.info_edit_window.show()
     
-    def render(self, draw_background_map = False):
+    def render_routemap(self, draw_background_map = False):
         theme = 'light' if self.button_light_theme.isChecked() else 'dark'
         is_one_way = self.button_oneway_yes.isChecked()
     
@@ -550,7 +587,11 @@ class RenderWindow(QWidget):
             page_color = '#282828'
         
         if draw_background_map:
-            self.svg_map = bus_api.get_mapbox_map(self.bus_routemap.mapframe, self.mapbox_key, mapbox_style) + self.svg_map
+            try:
+                self.svg_map = bus_api.get_mapbox_map(self.bus_routemap.mapframe, self.mapbox_key, mapbox_style) + self.svg_map
+            except Exception as e:
+                self.render_error.emit(type(e).__name__ + ": " + str(e))
+                raise
         else:
             x = self.bus_routemap.mapframe.left
             y = self.bus_routemap.mapframe.top
@@ -560,7 +601,7 @@ class RenderWindow(QWidget):
             self.svg_map = '<rect x="{}" y="{}" width="{}" height="{}" style="fill:{}" />'.format(x, y, width, height, page_color) + self.svg_map
     
     def refresh_preview(self):
-        self.render(self.checkbox_background_map.isChecked())
+        self.render_routemap(self.checkbox_background_map.isChecked())
         
         width = self.bus_routemap.mapframe.width()
         height = self.bus_routemap.mapframe.height()
@@ -599,7 +640,7 @@ class RenderWindow(QWidget):
         self.overwrite_result = 0
         
         if os.path.exists(filename):
-            dialog = OverwriteWindow(self, filename)
+            dialog = OkCancelDialog(self, ' ', '<p style="margin-bottom: 10px"><b>이름이 "{}"인 파일이 이미 존재합니다.</p><p>덮어쓰시겠습니까?</p>'.format(filename))
             dialog.show()
             
             loop = QEventLoop()
@@ -611,7 +652,7 @@ class RenderWindow(QWidget):
             if self.overwrite_result == 0:
                 return
         
-        self.render(self.checkbox_background_map.isChecked())
+        self.render_routemap(self.checkbox_background_map.isChecked())
         
         width = self.bus_routemap.mapframe.width()
         height = self.bus_routemap.mapframe.height()
@@ -688,9 +729,7 @@ class OptionsWindow(QWidget):
             key_json = {'bus_api_key': self.openapi_key_input.text(), 'mapbox_key': self.mapbox_key_input.text()}
             json.dump(key_json, key_file, indent=4)
             
-        self.parent_widget.key = self.openapi_key_input.text()
-        self.parent_widget.mapbox_key = self.mapbox_key_input.text()
-        
+        self.parent_widget.update_key(self.openapi_key_input.text(), self.mapbox_key_input.text())
         self.close()
 
 class MainWindow(QMainWindow):
@@ -773,6 +812,44 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(container)
     
+    def showEvent(self, event):
+        self.check_key_valid()
+        
+    def update_key(self, key, mapbox_key):
+        self.key = key
+        self.mapbox_key = mapbox_key
+        
+        self.seoul_key_valid = bus_api.check_seoul_key_valid(self.key)
+        self.gyeonggi_key_valid = bus_api.check_gyeonggi_key_valid(self.key)
+        self.busan_key_valid = bus_api.check_busan_key_valid(self.key)
+        self.mapbox_key_valid = mapbox.check_token_valid(self.mapbox_key)
+    
+    def check_key_valid(self):
+        if not self.seoul_key_valid and not self.gyeonggi_key_valid and not self.busan_key_valid:
+            self.key_error_dialog = OkDialog(self, '오류', 
+                '<p><b>OpenAPI 키가 올바르지 않습니다.</b></p>' +
+                '<p>서울시, 경기도, 부산시 버스정보시스템 API 키를 아래 사이트에서<br/>각각 발급받아야 사용할 수 있습니다.'+
+                '<ul><li>서울시 API: <a href="https://www.data.go.kr/data/15000193/openapi.do">https://www.data.go.kr/data/15000193/openapi.do</a></li>' +
+                '<li>경기도 API: <a href="https://www.data.go.kr/data/15080662/openapi.do">https://www.data.go.kr/data/15080662/openapi.do</a></li>' +
+                '<li>부산시 API: <a href="https://www.data.go.kr/data/15092750/openapi.do">https://www.data.go.kr/data/15092750/openapi.do</a></li></ul></p>')
+            self.key_error_dialog.setFixedSize(450, 180)
+            self.key_error_dialog.show()
+            
+            loop = QEventLoop()
+            self.key_error_dialog.result_signal.connect(loop.quit)
+            
+            loop.exec()
+        
+        if not self.mapbox_key_valid:
+            self.mapbox_key_error_dialog = OkDialog(self, '오류', '<p style="margin-bottom:5px"><b>Mapbox 키가 올바르지 않습니다.</b></p><p>배경 지도를 사용하려면 Mapbox 키가 유효해야 합니다.</p>')
+            self.mapbox_key_error_dialog.setFixedSize(360, 100)
+            self.mapbox_key_error_dialog.show()
+            
+            loop = QEventLoop()
+            self.mapbox_key_error_dialog.result_signal.connect(loop.quit)
+            
+            loop.exec()
+    
     def search_input_return(self):
         if not self.search_input.text():
             return
@@ -850,7 +927,12 @@ class MainWindow(QMainWindow):
     
     def open_render_window(self):
         self.render_window = RenderWindow(self, self.route_info, self.bus_stops, self.preview_points)
+        self.render_window.render_error.connect(self.render_error)
         self.render_window.show()
+    
+    def render_error(self, msg):
+        self.status_label.setText("[오류] " + msg)
+        del self.render_window
     
     def open_option_window(self):
         self.option_window = OptionsWindow(self)
@@ -861,9 +943,7 @@ class MainWindow(QMainWindow):
             with open('key.json', mode='r', encoding='utf-8') as key_file:
                 global key, naver_key_id, naver_key
                 key_json = json.load(key_file)
-                
-                self.key = key_json['bus_api_key']
-                self.mapbox_key = key_json['mapbox_key']
+                self.update_key(key_json['bus_api_key'], key_json['mapbox_key'])
         except FileNotFoundError:
             with open('key.json', mode='w', encoding='utf-8') as key_file:
                 key_json = {'bus_api_key': '', 'mapbox_key': ''}

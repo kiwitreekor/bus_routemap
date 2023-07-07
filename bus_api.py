@@ -7,6 +7,18 @@ from routemap import convert_gps, convert_pos, Mapframe, RouteMap
 class ApiKeyError(Exception):
     pass
 
+class ServerError(Exception):
+    pass
+
+class SeoulApiKeyError(ApiKeyError):
+    pass
+
+class GyeonggiApiKeyError(ApiKeyError):
+    pass
+
+class BusanApiKeyError(ApiKeyError):
+    pass
+
 route_type_str = {0: '공용', 1: '공항', 2: '마을', 3: '간선', 4: '지선', 5: '순환', 6: '광역', 7: '인천', 8: '경기', 9: '폐지', 10: '투어',
     11: '직행', 12: '좌석', 13: '일반', 14: '광역', 15: '따복', 16: '순환', 21: '농어촌직행', 22: '농어촌좌석', 23: '농어촌', 30: '마을', 
     41: '고속', 42: '시외좌석', 43: '시외일반', 51: '공항리무진', 52: '공항좌석', 53: '공항일반',
@@ -36,6 +48,38 @@ def convert_type_to_region(route_type):
     else:
         return '부산'
 
+def check_seoul_key_valid(key):
+    params = {'serviceKey': key}
+    
+    route_api_res = requests.get('http://ws.bus.go.kr/api/rest/busRouteInfo/getStaionByRoute', params = params).text
+    route_api_tree = elemtree.fromstring(route_api_res)
+
+    api_err = int(route_api_tree.find('./msgHeader/headerCd').text)
+    
+    if api_err == 7:
+        return False
+    return True
+
+def check_gyeonggi_key_valid(key):
+    params = {'serviceKey': key}
+    route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteStationList', params = params, timeout = 20).text
+    route_api_tree = elemtree.fromstring(route_api_res)
+    
+    api_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
+    if api_err != None:
+        return False
+    return True
+
+def check_busan_key_valid(key):
+    params = {'serviceKey': key}
+    route_api_res = requests.get('https://apis.data.go.kr/6260000/BusanBIMS/busInfoByRouteId', params = params, timeout = 20).text
+    route_api_tree = elemtree.fromstring(route_api_res)
+    
+    api_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
+    if api_err != None:
+        return False
+    return True
+
 def get_seoul_bus_stops(key, routeid):
     # 서울 버스 정류장 목록 조회
     params = {'serviceKey': key, 'busRouteId': routeid}
@@ -46,7 +90,7 @@ def get_seoul_bus_stops(key, routeid):
     api_err = int(route_api_tree.find('./msgHeader/headerCd').text)
     
     if api_err == 7:
-        raise ApiKeyError()
+        raise SeoulApiKeyError()
     
     if api_err != 0 and api_err != 4:
         raise ValueError(route_api_tree.find('./msgHeader/headerMsg').text)
@@ -75,7 +119,7 @@ def get_gyeonggi_bus_stops(key, routeid):
     
     api_common_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
     if api_common_err != None:
-        raise ApiKeyError(api_common_err.text)
+        raise GyeonggiApiKeyError(api_common_err.text)
 
     api_err = int(route_api_tree.find('./msgHeader/resultCode').text)
 
@@ -129,7 +173,7 @@ def get_busan_bus_stops(key, route_id, route_bims_id):
     
     api_common_err = route_api_tree2.find('./cmmMsgHeader/returnAuthMsg')
     if api_common_err != None:
-        raise ApiKeyError(api_common_err.text)
+        raise BusanApiKeyError(api_common_err.text)
     
     bus_stop_items2 = route_api_tree2.findall('./body/items/item')
     for i in bus_stop_items2:
@@ -149,7 +193,7 @@ def get_seoul_bus_type(key, routeid):
     api_err = int(route_api_tree.find('./msgHeader/headerCd').text)
     
     if api_err == 7:
-        raise ApiKeyError()
+        raise SeoulApiKeyError()
 
     if api_err != 0 and api_err != 4:
         raise ValueError(route_api_tree.find('./msgHeader/headerMsg').text)
@@ -173,7 +217,7 @@ def get_gyeonggi_bus_type(key, routeid):
     
     api_common_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
     if api_common_err != None:
-        raise ApiKeyError(api_common_err.text)
+        raise GyeonggiApiKeyError(api_common_err.text)
 
     api_err = int(route_api_tree.find('./msgHeader/resultCode').text)
 
@@ -219,7 +263,7 @@ def get_seoul_bus_route(key, routeid):
     api_err = int(route_api_tree.find('./msgHeader/headerCd').text)
 
     if api_err == 7:
-        raise ApiKeyError()
+        raise SeoulApiKeyError()
 
     if api_err != 0 and api_err != 4:
         raise ValueError(route_api_tree.find('./msgHeader/headerMsg').text)
@@ -246,7 +290,7 @@ def get_gyeonggi_bus_route(key, routeid):
     
     api_common_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
     if api_common_err != None:
-        raise ApiKeyError(api_common_err.text)
+        raise GyeonggiApiKeyError(api_common_err.text)
 
     api_err = int(route_api_tree.find('./msgHeader/resultCode').text)
 
@@ -298,7 +342,7 @@ def search_seoul_bus_info(key, number):
     api_err = int(list_api_tree.find('./msgHeader/headerCd').text)
     
     if api_err == 7:
-        raise ApiKeyError(list_api_tree.find('./msgHeader/headerMsg').text)
+        raise SeoulApiKeyError(list_api_tree.find('./msgHeader/headerMsg').text)
 
     if api_err != 0 and api_err != 4:
         raise ValueError(list_api_tree.find('./msgHeader/headerMsg').text)
@@ -333,7 +377,7 @@ def search_gyeonggi_bus_info(key, number):
         
         api_common_err = list_api_tree.find('./cmmMsgHeader/returnAuthMsg')
         if api_common_err != None:
-            raise ApiKeyError(api_common_err.text)
+            raise GyeonggiApiKeyError(api_common_err.text)
         
         api_err = int(list_api_tree.find('./msgHeader/resultCode').text)
         
@@ -360,28 +404,44 @@ def search_busan_bus_info(key, number):
     bus_info_list = []
     params = {'serviceKey': key, 'lineno': number}
     
-    list_api_res = requests.get('http://apis.data.go.kr/6260000/BusanBIMS/busInfo', params = params).text
-    list_api_tree = elemtree.fromstring(list_api_res)
-        
-    api_common_err = list_api_tree.find('./cmmMsgHeader/returnAuthMsg')
-    if api_common_err != None:
-        raise ApiKeyError(api_common_err.text)
+    success = False
     
-    api_err = int(list_api_tree.find('./header/resultCode').text)
+    for i in range(20):
+        try:
+            list_api_res = requests.get('http://apis.data.go.kr/6260000/BusanBIMS/busInfo', params = params).text
+            if list_api_res.find('http://apis.data.go.kr/503.html') != -1:
+                raise ServerError('503 Server Unavailable')
+                
+            list_api_tree = elemtree.fromstring(list_api_res)
+            
+            api_common_err = list_api_tree.find('./cmmMsgHeader/returnAuthMsg')
+            if api_common_err != None:
+                raise BusanApiKeyError(api_common_err.text)
+            
+            api_err = int(list_api_tree.find('./header/resultCode').text)
+            
+            if api_err != 0:
+                raise ValueError(list_api_tree.find('./header/resultMsg').text)
+            
+            xml_bus_list = list_api_tree.findall('./body/items/item')
+            
+            for i in xml_bus_list:
+                name = i.find('./buslinenum').text
+                route_id = i.find('./lineid').text
+                start = i.find('./startpoint').text
+                end = i.find('./endpoint').text
+                route_type = convert_busan_bus_type(i.find('./bustype').text)
+                
+                bus_info_list.append({'name': name, 'id': route_id, 'desc': start + '~' + end, 'type': route_type})
+        except Exception as e:
+            error = e
+            continue
+        else:
+            success = True
+            break
     
-    if api_err != 0:
-        raise ValueError(list_api_tree.find('./header/resultMsg').text)
-    
-    xml_bus_list = list_api_tree.findall('./body/items/item')
-    
-    for i in xml_bus_list:
-        name = i.find('./buslinenum').text
-        route_id = i.find('./lineid').text
-        start = i.find('./startpoint').text
-        end = i.find('./endpoint').text
-        route_type = convert_busan_bus_type(i.find('./bustype').text)
-        
-        bus_info_list.append({'name': name, 'id': route_id, 'desc': start + '~' + end, 'type': route_type})
+    if not success:
+        raise error
     
     return bus_info_list
 
@@ -412,6 +472,7 @@ def search_bus_info(key, number, return_error = False):
         exception = api_err
     except Exception as e:
         exception = ValueError('부산 버스 정보를 조회하는 중 오류가 발생했습니다: ' + str(e))
+        raise
         
     rx_number = re.compile('[0-9]+')
     is_number = bool(re.match('[0-9]+$', number))
@@ -508,25 +569,31 @@ def get_mapbox_map(mapframe, mapbox_key, mapbox_style):
     for x in range(tile_x1, tile_x2 + 1):
         for y in range(tile_y1, tile_y2 + 1):
             cache_filename = style_cache_dir + '/tile{}-{}-z{}.svg'.format(x, y, level)
-            if not os.path.exists(cache_filename):
-                with open(cache_filename, mode='w+', encoding='utf-8') as cache_file:
-                    mapbox.load_tile(mapbox_style, mapbox_key, x, y, level, draw_full_svg = True, clip_mask = True, fp = cache_file)
+            cache_valid = False
             
             pos_x = pos_x1 + (x - tile_x1) * tile_size
             pos_y = pos_y1 + (y - tile_y1) * tile_size
             
-            with open(cache_filename, mode='r', encoding='utf-8') as f:
-                text = f.read()
-                svg_match = re.search(r'<svg\s.*?>(.*)</svg>', text, re.DOTALL)
-                
-                if svg_match:
-                    tile = svg_match[1]
-                
-                    result += '<g id="tile{0}-{1}-z{2}" transform="translate({3}, {4}) scale({5}, {5}) ">\n'.format(x, y, level, pos_x, pos_y, tile_size / 4096)
-                    result += tile
-                    result += '</g>\n'
-                else:
-                    raise ValueError()
+            if os.path.exists(cache_filename):
+                with open(cache_filename, mode='r', encoding='utf-8') as f:
+                    text = f.read()
+                    svg_match = re.search(r'<svg\s.*?>(.*)</svg>', text, re.DOTALL)
+                    
+                    if svg_match:
+                        cache_valid = True
+                        tile = svg_match[1]
+                    
+                        result += '<g id="tile{0}-{1}-z{2}" transform="translate({3}, {4}) scale({5}, {5}) ">\n'.format(x, y, level, pos_x, pos_y, tile_size / 4096)
+                        result += tile
+                        result += '</g>\n'
+            
+            if not cache_valid:
+                try:
+                    with open(cache_filename, mode='w+', encoding='utf-8') as cache_file:
+                        mapbox.load_tile(mapbox_style, mapbox_key, x, y, level, draw_full_svg = True, clip_mask = True, fp = cache_file)
+                except:
+                    os.remove(cache_filename)
+                    raise
             
     result += '</g>\n'
     
