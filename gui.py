@@ -610,9 +610,9 @@ class RenderWindow(QWidget):
         self.info_edit_window.show()
     
     def refresh_preview(self):
-        self.load_db_thread = RenderThread(self, self.checkbox_background_map.isChecked())
-        self.load_db_thread.start()
-        self.load_db_thread.render_finished.connect(self.refresh_preview_after)
+        self.render_thread = RenderThread(self, self.checkbox_background_map.isChecked())
+        self.render_thread.start()
+        self.render_thread.render_finished.connect(self.refresh_preview_after)
         QApplication.setOverrideCursor(Qt.WaitCursor)
 
     def refresh_preview_after(self):
@@ -661,8 +661,6 @@ class RenderWindow(QWidget):
             
             if not result:
                 return
-        
-        self.render_routemap(self.checkbox_background_map.isChecked())
         
         width = self.bus_routemap.mapframe.width()
         height = self.bus_routemap.mapframe.height()
