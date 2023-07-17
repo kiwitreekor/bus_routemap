@@ -1,10 +1,12 @@
-import os, sys, json, requests, threading
-from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QAbstractItemView, QPushButton, QGroupBox, QRadioButton, QSpacerItem, QCheckBox, QProgressBar, QMessageBox, QGridLayout, QSlider
+import os, sys, json, requests, threading, shutil
+from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QAbstractItemView, QPushButton, QGroupBox, QRadioButton, QSpacerItem, QCheckBox, QProgressBar, QMessageBox, QGridLayout, QSlider, QDialog
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QSvgWidget
-from PySide6.QtCore import QByteArray, Qt, QBasicTimer, QObject, QEventLoop, Signal, Slot
+from PySide6.QtCore import QByteArray, Qt, QBasicTimer, QObject, QEventLoop, Signal, Slot, QThread
 from PySide6.QtGui import QIcon, QTextDocument, QTextOption, QIntValidator
 import bus_api, routemap, mapbox
+
+version = '1.1'
 
 def resource_path(relative_path):
     base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
@@ -61,12 +63,12 @@ class BusRouteThread(QObject):
         result_json = json.dumps({'result': {'route_positions': route_positions, 'route_info': route_info, 'bus_stops': bus_stops}, 'error': error})
         self.thread_finished.emit(result_json)
 
-class OkDialog(QWidget):
-    result_signal = Signal()
-    
+class OkDialog(QDialog):
     def __init__(self, parent, title, text):
         super().__init__()
         
+        self.result = 0
+
         self.setWindowTitle(title)
         self.setWindowModality(Qt.ApplicationModal)
         
@@ -92,8 +94,12 @@ class OkDialog(QWidget):
         self.setLayout(layout)
         self.setFixedSize(320, 100)
     
+    def exec(self):
+        super().exec()
+        return self.result
+    
     def click_yes(self):
-        self.result_signal.emit()
+        self.result = 1
         self.close()
 
 class OkCancelDialog(QDialog):
@@ -378,6 +384,78 @@ class SizeSlider(QWidget):
     def emit_value_changed(self):
         self.valueChanged.emit()
 
+class RenderThread(QThread):
+    render_finished = Signal()
+
+    def __init__(self, parent, draw_background_map = False):
+        super().__init__(parent=parent)
+        self.draw_background_map = draw_background_map
+
+    def run(self):
+        parent = self.parent()
+        theme = 'light' if parent.button_light_theme.isChecked() else 'dark'
+        is_one_way = parent.button_oneway_yes.isChecked()
+    
+        parent.bus_routemap = routemap.RouteMap(parent.route_info, parent.bus_stops, parent.points, is_one_way = is_one_way, theme = theme)
+        
+        route_size = parent.bus_routemap.mapframe.size()
+        
+        if route_size[0] < route_size[1] / 1.5:
+            route_size = (route_size[1] / 1.5, route_size[1])
+        elif route_size[1] < route_size[0] / 1.5:
+            route_size = (route_size[0], route_size[0] / 1.5)
+        
+        size_factor_base = route_size[0] / 640
+        route_size_factor = size_factor_base * (parent.size_slider.value() / 100)
+        info_size_factor = size_factor_base * (parent.info_size_slider.value() / 100) * 0.75
+        circle_size_factor = size_factor_base * (parent.circle_size_slider.value() / 100)
+        text_size_factor = size_factor_base * (parent.text_size_slider.value() / 100)
+        min_interval = 60 * route_size_factor
+        
+        if parent.render_bus_stop_list == None:
+            parent.render_bus_stop_list = parent.bus_routemap.parse_bus_stops(min_interval)
+            parent.trans_id = parent.bus_routemap.trans_id
+        else:
+            parent.bus_routemap.update_trans_id(parent.trans_id)
+        
+        # 노선도 렌더링
+        parent.bus_routemap.render_init()
+        
+        parent.svg_map = parent.bus_routemap.render_path(route_size_factor)
+        for stop in parent.render_bus_stop_list:
+            parent.svg_map += parent.bus_routemap.draw_bus_stop_circle(stop, circle_size_factor)
+            
+            if 'text_dir' in stop:
+                parent.svg_map += parent.bus_routemap.draw_bus_stop_text(stop, text_size_factor, stop['text_dir'])
+            else:
+                parent.svg_map += parent.bus_routemap.draw_bus_stop_text(stop, text_size_factor)
+        parent.svg_map += parent.bus_routemap.draw_bus_info(info_size_factor) + '\n'
+        
+        parent.bus_routemap.mapframe.extend(size_factor_base * 30)
+        
+        if theme == 'light':
+            mapbox_style = 'kiwitree/clinp1vgh002t01q4c2366q3o'
+            page_color = '#ffffff'
+        elif theme == 'dark':
+            mapbox_style = 'kiwitree/clirdaqpr00hu01pu8t7vhmq7'
+            page_color = '#282828'
+        
+        if self.draw_background_map:
+            try:
+                parent.svg_map = bus_api.get_mapbox_map(parent.bus_routemap.mapframe, parent.mapbox_key, mapbox_style) + parent.svg_map
+            except Exception as e:
+                self.render_error.emit(type(e).__name__ + ": " + str(e))
+                raise
+        else:
+            x = parent.bus_routemap.mapframe.left
+            y = parent.bus_routemap.mapframe.top
+            width = parent.bus_routemap.mapframe.width()
+            height = parent.bus_routemap.mapframe.height()
+            
+            parent.svg_map = '<rect x="{}" y="{}" width="{}" height="{}" style="fill:{}" />'.format(x, y, width, height, page_color) + parent.svg_map
+        
+        self.render_finished.emit()
+
 class RenderWindow(QWidget):
     render_error = Signal(str)
     
@@ -531,71 +609,13 @@ class RenderWindow(QWidget):
         self.info_edit_window = BusInfoEditWindow(self)
         self.info_edit_window.show()
     
-    def render_routemap(self, draw_background_map = False):
-        theme = 'light' if self.button_light_theme.isChecked() else 'dark'
-        is_one_way = self.button_oneway_yes.isChecked()
-    
-        self.bus_routemap = routemap.RouteMap(self.route_info, self.bus_stops, self.points, is_one_way = is_one_way, theme = theme)
-        
-        route_size = self.bus_routemap.mapframe.size()
-        
-        if route_size[0] < route_size[1] / 1.5:
-            route_size = (route_size[1] / 1.5, route_size[1])
-        elif route_size[1] < route_size[0] / 1.5:
-            route_size = (route_size[0], route_size[0] / 1.5)
-        
-        size_factor_base = route_size[0] / 640
-        route_size_factor = size_factor_base * (self.size_slider.value() / 100)
-        info_size_factor = size_factor_base * (self.info_size_slider.value() / 100) * 0.75
-        circle_size_factor = size_factor_base * (self.circle_size_slider.value() / 100)
-        text_size_factor = size_factor_base * (self.text_size_slider.value() / 100)
-        min_interval = 60 * route_size_factor
-        
-        if self.render_bus_stop_list == None:
-            self.render_bus_stop_list = self.bus_routemap.parse_bus_stops(min_interval)
-            self.trans_id = self.bus_routemap.trans_id
-        else:
-            self.bus_routemap.update_trans_id(self.trans_id)
-        
-        # 노선도 렌더링
-        self.bus_routemap.render_init()
-        
-        self.svg_map = self.bus_routemap.render_path(route_size_factor)
-        for stop in self.render_bus_stop_list:
-            self.svg_map += self.bus_routemap.draw_bus_stop_circle(stop, circle_size_factor)
-            
-            if 'text_dir' in stop:
-                self.svg_map += self.bus_routemap.draw_bus_stop_text(stop, text_size_factor, stop['text_dir'])
-            else:
-                self.svg_map += self.bus_routemap.draw_bus_stop_text(stop, text_size_factor)
-        self.svg_map += self.bus_routemap.draw_bus_info(info_size_factor) + '\n'
-        
-        self.bus_routemap.mapframe.extend(size_factor_base * 30)
-        
-        if theme == 'light':
-            mapbox_style = 'kiwitree/clinp1vgh002t01q4c2366q3o'
-            page_color = '#ffffff'
-        elif theme == 'dark':
-            mapbox_style = 'kiwitree/clirdaqpr00hu01pu8t7vhmq7'
-            page_color = '#282828'
-        
-        if draw_background_map:
-            try:
-                self.svg_map = bus_api.get_mapbox_map(self.bus_routemap.mapframe, self.mapbox_key, mapbox_style) + self.svg_map
-            except Exception as e:
-                self.render_error.emit(type(e).__name__ + ": " + str(e))
-                raise
-        else:
-            x = self.bus_routemap.mapframe.left
-            y = self.bus_routemap.mapframe.top
-            width = self.bus_routemap.mapframe.width()
-            height = self.bus_routemap.mapframe.height()
-            
-            self.svg_map = '<rect x="{}" y="{}" width="{}" height="{}" style="fill:{}" />'.format(x, y, width, height, page_color) + self.svg_map
-    
     def refresh_preview(self):
-        self.render_routemap(self.checkbox_background_map.isChecked())
-        
+        self.load_db_thread = RenderThread(self, self.checkbox_background_map.isChecked())
+        self.load_db_thread.start()
+        self.load_db_thread.render_finished.connect(self.refresh_preview_after)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+
+    def refresh_preview_after(self):
         width = self.bus_routemap.mapframe.width()
         height = self.bus_routemap.mapframe.height()
         
@@ -622,6 +642,9 @@ class RenderWindow(QWidget):
             self.setFixedSize(max(self.minimum_width, window_width + (widget_width - self.svg_container.width())), window_height)
         else:
             self.setFixedSize(window_width, max(self.minimum_height, window_height + (widget_height - self.svg_container.height())))
+            
+        QApplication.restoreOverrideCursor()
+        QApplication.processEvents()
     
     def export(self):
         filename = self.filename_input.text()
@@ -712,11 +735,8 @@ class OptionsWindow(QWidget):
         self.close()
     
     def save(self):
-        with open('key.json', mode='w', encoding='utf-8') as key_file:
-            key_json = {'bus_api_key': self.openapi_key_input.text(), 'mapbox_key': self.mapbox_key_input.text()}
-            json.dump(key_json, key_file, indent=4)
-            
         self.parent_widget.update_key(self.openapi_key_input.text(), self.mapbox_key_input.text())
+        self.parent_widget.save_key()
         self.close()
 
 class MainWindow(QMainWindow):
@@ -801,6 +821,10 @@ class MainWindow(QMainWindow):
     
     def showEvent(self, event):
         self.check_key_valid()
+    
+    def closeEvent(self, event):
+        self.save_key()
+        super().closeEvent(event)
         
     def update_key(self, key, mapbox_key):
         self.key = key
@@ -928,17 +952,25 @@ class MainWindow(QMainWindow):
     def load_key(self):
         try:
             with open('key.json', mode='r', encoding='utf-8') as key_file:
-                global key, naver_key_id, naver_key
                 key_json = json.load(key_file)
                 self.update_key(key_json['bus_api_key'], key_json['mapbox_key'])
+
+                # v1.1: cache structure changed
+                if 'version' not in key_json:
+                    shutil.rmtree(bus_api.cache_dir)
         except FileNotFoundError:
             with open('key.json', mode='w', encoding='utf-8') as key_file:
-                key_json = {'bus_api_key': '', 'mapbox_key': ''}
+                key_json = {'bus_api_key': '', 'mapbox_key': '', 'version': version}
                 json.dump(key_json, key_file, indent=4)
             
             self.key = ''
             self.mapbox_key = ''
     
+    def save_key(self):
+        with open('key.json', mode='w', encoding='utf-8') as key_file:
+            key_json = {'bus_api_key': self.key, 'mapbox_key': self.mapbox_key, 'version': version}
+            json.dump(key_json, key_file, indent=4)
+
     def render_preview_routemap(self):
         if not self.preview_points:
             return

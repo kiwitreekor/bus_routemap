@@ -1,6 +1,6 @@
 import xml.etree.ElementTree as elemtree
 from datetime import datetime
-import requests, time, sys, os, re, math, json, base64, urllib
+import requests, time, sys, os, re, math, json, base64, urllib, io
 import mapbox
 from routemap import convert_gps, convert_pos, Mapframe, RouteMap
 
@@ -570,30 +570,38 @@ def get_mapbox_map(mapframe, mapbox_key, mapbox_style):
         for y in range(tile_y1, tile_y2 + 1):
             cache_filename = style_cache_dir + '/tile{}-{}-z{}.svg'.format(x, y, level)
             cache_valid = False
+            tile = None
+            rx_svg = re.compile(r'<svg\s.*?>(.*)</svg>', flags = re.DOTALL)
             
             pos_x = pos_x1 + (x - tile_x1) * tile_size
             pos_y = pos_y1 + (y - tile_y1) * tile_size
-            
+
             if os.path.exists(cache_filename):
                 with open(cache_filename, mode='r', encoding='utf-8') as f:
                     text = f.read()
-                    svg_match = re.search(r'<svg\s.*?>(.*)</svg>', text, re.DOTALL)
+                    svg_match = rx_svg.search(text)
                     
                     if svg_match:
                         cache_valid = True
                         tile = svg_match[1]
-                    
-                        result += '<g id="tile{0}-{1}-z{2}" transform="translate({3}, {4}) scale({5}, {5}) ">\n'.format(x, y, level, pos_x, pos_y, tile_size / 4096)
-                        result += tile
-                        result += '</g>\n'
             
             if not cache_valid:
                 try:
+                    cache_io = io.StringIO()
+                    mapbox.load_tile(mapbox_style, mapbox_key, x, y, level, draw_full_svg = True, clip_mask = True, fp = cache_io)
+                    
+                    text = cache_io.getvalue()
+                    tile = rx_svg.search(text)[1]
+
                     with open(cache_filename, mode='w+', encoding='utf-8') as cache_file:
-                        mapbox.load_tile(mapbox_style, mapbox_key, x, y, level, draw_full_svg = True, clip_mask = True, fp = cache_file)
+                        cache_file.write(text)
                 except:
                     os.remove(cache_filename)
                     raise
+            
+            result += '<g id="tile{0}-{1}-z{2}" transform="translate({3}, {4}) scale({5}, {5}) ">\n'.format(x, y, level, pos_x, pos_y, tile_size / 4096)
+            result += tile
+            result += '</g>\n'
             
     result += '</g>\n'
     
