@@ -96,17 +96,14 @@ class OkDialog(QWidget):
         self.result_signal.emit()
         self.close()
 
-class OkCancelDialog(QWidget):
-    result_signal = Signal(int)
-    
+class OkCancelDialog(QDialog):
     def __init__(self, parent, title, text):
         super().__init__()
         
+        self.result = 0
+        
         self.setWindowTitle(title)
         self.setWindowModality(Qt.ApplicationModal)
-        
-        icon = QIcon(resource_path("resources/icon.ico"))
-        self.setWindowIcon(icon)
         
         self.text_label = QLabel(text)
         
@@ -129,18 +126,17 @@ class OkCancelDialog(QWidget):
         
         self.setLayout(layout)
         self.setFixedSize(320, 100)
-        
-        self.destroyed.connect(self.cancel)
     
-    def cancel(self):
-        self.result_signal.emit(0)
+    def exec(self):
+        super().exec()
+        return self.result
     
     def click_yes(self):
-        self.result_signal.emit(1)
+        self.result = 1
         self.close()
     
     def click_no(self):
-        self.result_signal.emit(0)
+        self.result = 0
         self.close()
 
 class BusInfoEditWindow(QWidget):
@@ -527,9 +523,6 @@ class RenderWindow(QWidget):
     def showEvent(self, event):
         self.refresh_preview()
     
-    def handle_result_status(self, value):
-        self.overwrite_result = value
-    
     def bus_stop_edit_window(self):
         self.stop_edit_window = BusStopEditWindow(self)
         self.stop_edit_window.show()
@@ -641,15 +634,9 @@ class RenderWindow(QWidget):
         
         if os.path.exists(filename):
             dialog = OkCancelDialog(self, ' ', '<p style="margin-bottom: 10px"><b>이름이 "{}"인 파일이 이미 존재합니다.</p><p>덮어쓰시겠습니까?</p>'.format(filename))
-            dialog.show()
+            result = dialog.exec()
             
-            loop = QEventLoop()
-            dialog.result_signal.connect(self.handle_result_status)
-            dialog.result_signal.connect(loop.quit)
-            
-            loop.exec()
-            
-            if self.overwrite_result == 0:
+            if not result:
                 return
         
         self.render_routemap(self.checkbox_background_map.isChecked())
