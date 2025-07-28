@@ -1014,6 +1014,63 @@ class MainWindow(QMainWindow):
     
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    app.setStyleSheet("""
+        QLineEdit { padding: 3px; border: 1px solid rgba(0, 0, 0, 10%); background-color: #fff; border-radius: 4px }
+        QPushButton { padding: 4px; border: 1px solid rgba(0, 0, 0, 10%); background-color: #fff; border-radius: 4px; min-width: 75px; outline: 0px }
+        QPushButton:hover { background-color: #f3f3f3; }
+        QPushButton:pressed { background-color: #eee; }
+        QPushButton:checked { background-color: #eee; }
+        QTableWidget { border: 1px solid rgba(0, 0, 0, 10%); outline: 0px }
+        QMenu { background-color: #fff; border: 1px solid rgba(0, 0, 0, 10%); border-radius: 6px; }
+        QMenu::item { background-color: transparent; margin: 3px; padding: 4px 15px }
+        QMenu::item:hover { background-color: #eee; color: #000; border-radius: 4px }
+        QMenu::item:selected { background-color: #eee; color: #000; border-radius: 4px }
+        QMenu::separator { border-top: 1px solid #ddd; height: 0px; }
+    
+        QScrollBar:vertical {
+            background: #e0e0e0; /* 전체 배경 */
+            width: 6px;
+            margin: 0px 0px 0px 0px;
+            border: none;
+        }
+        QScrollBar::handle:vertical {
+            background: #c0c0c0; /* 핸들(스크롤 이동 부분) 색상 */
+            min-height: 20px;
+            border-radius: 3px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #a0a0a0; /* 핸들 호버 상태 색상 */
+        }
+        QScrollBar::sub-line:vertical, QScrollBar::add-line:vertical {
+            background: none;
+            height: 0px;
+        }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            background: #e0e0e0; /* 빈 공간 색상 */
+        }
+    
+        QScrollBar:horizontal {
+            background: #e0e0e0; /* 전체 배경 */
+            height: 6px;
+            margin: 0px 0px 0px 0px;
+            border: none;
+        }
+        QScrollBar::handle:horizontal {
+            background: #c0c0c0; /* 핸들(스크롤 이동 부분) 색상 */
+            min-width: 20px;
+            border-radius: 3px;
+        }
+        QScrollBar::handle:horizontal:hover {
+            background: #a0a0a0; /* 핸들 호버 상태 색상 */
+        }
+        QScrollBar::sub-line:horizontal, QScrollBar::add-line:horizontal {
+            background: none;
+            width: 0px;
+        }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            background: #e0e0e0; /* 빈 공간 색상 */
+        }
+    """)
 
     window = MainWindow()
     window.show()
