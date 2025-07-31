@@ -62,13 +62,16 @@ def check_seoul_key_valid(key):
 
 def check_gyeonggi_key_valid(key):
     params = {'serviceKey': key}
-    route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteStationList', params = params, timeout = 20).text
-    route_api_tree = elemtree.fromstring(route_api_res)
-    
-    api_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
-    if api_err != None:
-        return False
+    route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/v2/getBusRouteStationListv2', params = params, timeout = 20)
+
+    if route_api_res.headers.get('Content-Type').startswith('text/xml'):
+        route_api_tree = elemtree.fromstring(route_api_res.text)
+        
+        api_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
+        if api_err != None:
+            return False
     return True
+
 
 def check_busan_key_valid(key):
     params = {'serviceKey': key}
@@ -112,10 +115,13 @@ def get_seoul_bus_stops(key, routeid):
 
 def get_gyeonggi_bus_stops(key, routeid):
     # 경기 버스 정류장 목록 조회
-    params = {'serviceKey': key, 'routeId': routeid}
+    params = {'serviceKey': key, 'routeId': routeid, 'format': 'xml'}
     
-    route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteStationList', params = params, timeout = 20).text
-    route_api_tree = elemtree.fromstring(route_api_res)
+    route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/v2/getBusRouteStationListv2', params = params, timeout = 20)
+    if not (route_api_res.headers.get('Content-Type').startswith('text/xml') or route_api_res.headers.get('Content-Type').startswith('application/xml')):
+        return []
+
+    route_api_tree = elemtree.fromstring(route_api_res.text)
     
     api_common_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
     if api_common_err != None:
@@ -210,11 +216,14 @@ def get_seoul_bus_type(key, routeid):
 
 def get_gyeonggi_bus_type(key, routeid):
     # 경기 버스 노선정보 조회
-    params = {'serviceKey': key, 'routeId': routeid}
+    params = {'serviceKey': key, 'routeId': routeid, 'format': 'xml'}
     
-    route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteInfoItem', params = params, timeout = 20).text
-    route_api_tree = elemtree.fromstring(route_api_res)
-    
+    route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/v2/getBusRouteInfoItemv2', params = params, timeout = 20)
+    if not (route_api_res.headers.get('Content-Type').startswith('text/xml') or route_api_res.headers.get('Content-Type').startswith('application/xml')):
+        return []
+
+    route_api_tree = elemtree.fromstring(route_api_res.text)
+
     api_common_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
     if api_common_err != None:
         raise GyeonggiApiKeyError(api_common_err.text)
@@ -283,10 +292,13 @@ def get_seoul_bus_route(key, routeid):
 
 def get_gyeonggi_bus_route(key, routeid):
     # 경기 버스 노선형상 조회
-    params = {'serviceKey': key, 'routeId': routeid}
+    params = {'serviceKey': key, 'routeId': routeid, 'format': 'xml'}
     
-    route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteLineList', params = params, timeout = 20).text
-    route_api_tree = elemtree.fromstring(route_api_res)
+    route_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/v2/getBusRouteLineListv2', params = params, timeout = 20)
+    if not (route_api_res.headers.get('Content-Type').startswith('text/xml') or route_api_res.headers.get('Content-Type').startswith('application/xml')):
+        return []
+    
+    route_api_tree = elemtree.fromstring(route_api_res.text)
     
     api_common_err = route_api_tree.find('./cmmMsgHeader/returnAuthMsg')
     if api_common_err != None:
@@ -370,11 +382,14 @@ def search_gyeonggi_bus_info(key, number):
     bus_info_list = []
     
     try:
-        params = {'serviceKey': key, 'keyword': number}
+        params = {'serviceKey': key, 'keyword': number, 'format': 'xml'}
+
+        list_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/v2/getBusRouteListv2', params = params, timeout = 5)
+        if not (list_api_res.headers.get('Content-Type').startswith('text/xml') or list_api_res.headers.get('Content-Type').startswith('application/xml')):
+            return []
         
-        list_api_res = requests.get('http://apis.data.go.kr/6410000/busrouteservice/getBusRouteList', params = params, timeout = 5).text
-        list_api_tree = elemtree.fromstring(list_api_res)
-        
+        list_api_tree = elemtree.fromstring(list_api_res.text)
+
         api_common_err = list_api_tree.find('./cmmMsgHeader/returnAuthMsg')
         if api_common_err != None:
             raise GyeonggiApiKeyError(api_common_err.text)

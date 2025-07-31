@@ -1,5 +1,6 @@
-from datetime import datetime
-import requests, time, sys, os, re, math, json, base64, urllib
+import re, math, html
+from PIL import ImageFont
+from matplotlib import font_manager
 
 origin_tile = (3490, 1584)
 
@@ -68,6 +69,11 @@ class Mapframe():
         bottom = max(y for _, y in points)
         
         return cls(left, top, right, bottom)
+
+def escape_svg_text(text: str) -> str:
+    escaped = html.escape(text, quote=True)
+    escaped = escaped.replace("'", "&apos;")
+    return escaped
 
 def make_svg_path(style, points):
     path = "M"
@@ -145,9 +151,21 @@ def get_point_segment(points, start, end, dist):
     idx_prev = i
     
     return idx_prev, idx_next
+
+def find_font_file(font_style):
+    fp = font_manager.FontProperties(**font_style)  
+    font_path = font_manager.findfont(fp, fallback_to_default=False)
+
+    return font_path
     
+def get_text_width(text, font_style):
+    font_file = find_font_file(font_style)
+
+    if font_file:
+        font = ImageFont.truetype(font_file, 72)
+        if font:
+            return font.getlength(text) / 72
     
-def get_text_width(text):
     result = 0
     
     for i in text:
@@ -161,6 +179,7 @@ def get_text_width(text):
             result += 1
     
     return result
+
 
 def check_collision(r1, r2):
     if r1[0] < r2[0] + r2[2] and r1[0] + r1[2] > r2[0] and r1[1] < r2[1] + r2[3] and r1[1] + r1[3] > r2[1]:
@@ -183,7 +202,7 @@ def get_collision_score(new_rect, rects, points):
         collision += check_collision(r, new_rect)
     
     for p in points:
-        collision += check_collision((p[0] - 2, p[1] - 2, 4, 4), new_rect)
+        collision += 4 * check_collision((p[0] - 2, p[1] - 2, 4, 4), new_rect)
     
     return collision
 
@@ -206,6 +225,9 @@ def min_distance_from_segments(pos, points):
     return min_dist
 
 def get_bus_stop_name(bus_stop):
+    if bus_stop['name'] == '4.19민주묘지역': # 역명에 마침표가 있는 유일한 경우
+        return '4.19민주묘지역', True
+    
     name_split = bus_stop['name'].split('.')
     name = bus_stop['name']
     
@@ -216,10 +238,11 @@ def get_bus_stop_name(bus_stop):
         
     for n in name_split:
         # 주요 경유지 처리
-        stn_match = re.search(r'(?:(?:지하철)?[1-9]호선|신분당선|공항철도)?(.+역)(?:[1-9]호선|환승센터)?(?:[0-9]+번(출구|승강장))?$', n)
+        stn_match = re.search(r'(?:(?:지하철)?[1-9]호선|신분당선|공항철도)?(.+역)(?:[1-9]호선|환승센터|환승센타)?(?:[0-9]+번(출구|승강장))?$', n)
         center_match = re.search(r'(광역환승센터|환승센터|환승센타|고속터미널|잠실종합운동장)$', n)
         
         if center_match:
+            n = n.replace('환승센타', '환승센터')
             return n, True
         elif stn_match:
             stn_name = stn_match[1]
@@ -372,18 +395,40 @@ class RouteMap():
         
         return main_stop_list + minor_stop_list
 
-    def draw_bus_info(self, size_factor):
-        name_match = re.search('[0-9A-Za-z]+', self.route_info['name'])
+    def get_bus_name(self):
+        name_match = re.search(r'[0-9A-Za-z]+', self.route_info['name'])
         if name_match:
             bus_name_main = self.route_info['name'][:name_match.end(0)]
             bus_name_suffix = self.route_info['name'][name_match.end(0):]
         else:
             bus_name_main = self.route_info['name']
             bus_name_suffix = ''
-            
-        bus_name_width = get_text_width(bus_name_main) * 72 + get_text_width(bus_name_suffix) * 60 + 45
-        bus_startend_width = (get_text_width(self.route_info['start']) + get_text_width(self.route_info['end'])) * 57 + 150
         
+        return bus_name_main, bus_name_suffix
+
+    def draw_bus_info(self, size_factor):
+        bus_name_main, bus_name_suffix = self.get_bus_name()
+        bus_name_main_svg = ''
+        bus_name_main_split = re.findall(r'[가-힣]+|N|[^가-힣]+', bus_name_main)
+        bus_name_main_x = 0
+
+        for i in range(len(bus_name_main_split)):
+            if re.match(r'[가-힣]', bus_name_main_split[i]):
+                bus_name_main_svg += '<text y="75" x="{}" style="font-weight:bold;font-size:72px;font-family:\'NanumSquare\';text-align:start;fill:#ffffff">{}</text>'.format(bus_name_main_x + 20, escape_svg_text(bus_name_main_split[i]))
+                bus_name_main_x += get_text_width(bus_name_main_split[i], {'family': 'NanumSquare', 'weight': 'bold'}) * 72
+            else:
+                if bus_name_main_split[i] == 'N':
+                    bus_name_main_svg += '<text y="82" x="{}" style="font-weight:normal;font-size:85.3333px;font-family:\'Din Medium\';text-align:start;fill:#ffcc00">{}</text>'.format(bus_name_main_x + 20, escape_svg_text(bus_name_main_split[i]))
+                else:
+                    bus_name_main_svg += '<text y="82" x="{}" style="font-weight:normal;font-size:85.3333px;font-family:\'Din Medium\';text-align:start;fill:#ffffff">{}</text>'.format(bus_name_main_x + 20, escape_svg_text(bus_name_main_split[i]))
+                bus_name_main_x += get_text_width(bus_name_main_split[i], {'family': 'Din Medium'}) * 85.3333
+
+        bus_name_svg = bus_name_main_svg + '<text y="82" x="{}" style="font-weight:normal;font-size:72px;font-family:\'Din Medium\';text-align:start;fill:#ffffff">{}</text>'.format(bus_name_main_x + 20, escape_svg_text(bus_name_suffix))
+        bus_name_main_x += get_text_width(bus_name_suffix, {'family': 'Din Medium'}) * 72
+
+        bus_name_width = bus_name_main_x + 40
+        bus_startend_width = (get_text_width(self.route_info['start'], {'family': 'NanumSquare'}) + get_text_width(self.route_info['end'], {'family': 'NanumSquare'})) * 64 + 135
+
         bus_info_width = (bus_name_width + bus_startend_width) * size_factor
         
         if self.mapframe.width() < bus_info_width:
@@ -396,13 +441,9 @@ class RouteMap():
         
         self.mapframe.update_rect((pos_x, pos_y, bus_info_width, 100 * size_factor))
         
-        bus_name_svg = bus_name_main + '<tspan style="font-size:72px">{}</tspan>'.format(bus_name_suffix)
-        if bus_name_main[0] == 'N':
-            bus_name_svg = '<tspan style="fill:#ffcc00">N</tspan>' + bus_name_svg[1:]
-        
         svg_text = '<g id="businfo" transform="translate({0}, {1}) scale({2}, {2})" style="display:inline">'.format(pos_x, pos_y, size_factor)
         svg_text += '<rect y="0" x="0" height="100" width="{}" id="busname_bg" style="opacity:1;fill:{};fill-opacity:1;stroke:none;" />'.format(bus_name_width, self.line_color)
-        svg_text += '<text id="busname" y="82" x="20" style="font-weight:normal;font-size:85.3333px;font-family:\'Din Medium\';text-align:start;fill:#ffffff">{}</text>'.format(bus_name_svg)
+        svg_text += bus_name_svg
         svg_text += '<rect y="0" x="{}" height="100" width="{}" id="busstartend_bg" style="opacity:1;fill:#ffffff;fill-opacity:1;stroke:none;" />'.format(bus_name_width, bus_startend_width)
         svg_text += '<text id="busstartend" y="70" x="{}" style="font-weight:bold;font-size:64px;font-family:\'NanumSquare\';text-align:start;fill:#000000">{} <tspan style="font-family:\'NanumSquareRound\'">↔</tspan> {}</text>'.format(bus_name_width + 20, self.route_info['start'], self.route_info['end'])
         svg_text += '</g>'
@@ -430,7 +471,6 @@ class RouteMap():
     def draw_bus_stop_text(self, stop, size_factor, direction = -1):
         style_fill_white = "fill:#ffffff;"
         style_fill_gray = "fill:#cccccc;"
-        style_fill_yellow = "fill:#ffcc00;"
         style_text = "font-size:30px;line-height:1.0;font-family:'KoPubDotum Bold';text-align:start;letter-spacing:0px;word-spacing:0px;fill-opacity:1;"
         
         section = 0 if stop['section'] == 0 or self.is_one_way else 1
@@ -465,22 +505,26 @@ class RouteMap():
         else:
             stop_name_main = stop['name']
             stop_name_suffix = ''
+
+        text_width = (get_text_width(stop_name_main, {'family': 'KoPubDotum', 'weight': 'bold'}) * 30 + get_text_width(stop_name_suffix, {'family': 'KoPubDotum', 'weight': 'bold'}) * 24 + 30)
+        text_offset = 0
+
+        if stop['ord'] == 0:
+            text_offset = 40 * text_size_factor
         
-        text_width = (get_text_width(stop_name_main) * 27.5 + get_text_width(stop_name_suffix) * 22 + 25)
+        text_pos_right = (stop['pos'][0] + 16 * normal_dir[0] * size_factor,  stop['pos'][1] + 16 * normal_dir[1] * size_factor - text_height / 2)
+        text_rect_right = (text_pos_right[0], text_pos_right[1], text_width * text_size_factor + text_offset, text_height)
         
-        text_pos_right = (stop['pos'][0] + 20 * normal_dir[0] * size_factor,  stop['pos'][1] + 20 * normal_dir[1] * size_factor - text_height / 2)
-        text_rect_right = (text_pos_right[0], text_pos_right[1], text_width * text_size_factor, text_height)
-        
-        text_pos_left = (stop['pos'][0] - 20 * normal_dir[0] * size_factor - text_width * text_size_factor, stop['pos'][1] - 20 * normal_dir[1] * size_factor - text_height / 2)
-        text_rect_left = (text_pos_left[0], text_pos_left[1], text_width * text_size_factor, text_height)
-        
-        if normal_dir[1] < 0:
+        text_pos_left = (stop['pos'][0] - 16 * normal_dir[0] * size_factor - text_width * text_size_factor - text_offset, stop['pos'][1] - 16 * normal_dir[1] * size_factor - text_height / 2)
+        text_rect_left = (text_pos_left[0], text_pos_left[1], text_width * text_size_factor + text_offset, text_height)
+
+        if normal_dir[1] > 0:
             normal_dir = (-normal_dir[0], -normal_dir[1])
         
-        text_pos_up = (stop['pos'][0] + 20 * normal_dir[0] * size_factor - text_width * text_size_factor / 2, stop['pos'][1] + 25 * normal_dir[1] * size_factor - text_height / 2)
+        text_pos_up = (stop['pos'][0] - text_width * text_size_factor / 2, stop['pos'][1] - 25 * size_factor - text_height / 2)
         text_rect_up = (text_pos_up[0], text_pos_up[1], text_width * text_size_factor, text_height)
         
-        text_pos_down = (stop['pos'][0] - 20 * normal_dir[0] * size_factor - text_width * text_size_factor / 2, stop['pos'][1] - 25 * normal_dir[1] * size_factor - text_height / 2)
+        text_pos_down = (stop['pos'][0] - text_width * text_size_factor / 2, stop['pos'][1] + 25 * size_factor - text_height / 2)
         text_rect_down = (text_pos_down[0], text_pos_down[1], text_width * text_size_factor, text_height)
         
         text_pos_list = [text_pos_up, text_pos_down, text_pos_left, text_pos_right]
@@ -488,30 +532,33 @@ class RouteMap():
         
         if direction == -1:
             collisions = [get_collision_score(x, self.text_rects, self.points) for x in text_rect_list]
-            direction = 0
-            
-            for i in range(1, len(collisions)):
-                if collisions[direction] >= collisions[i]:
-                    direction = i
-            
-            text_pos = text_pos_list[direction]
-            text_rect = text_rect_list[direction]
+
+            if stop['ord'] == 0:
+                direction = 2
+                if collisions[2] >= collisions[3]:
+                    direction = 3
+            else:
+                direction = 0
+                
+                for i in range(1, len(collisions)):
+                    if collisions[direction] >= collisions[i]:
+                        direction = i
         else:
             if direction >= len(text_rect_list) or direction < 0:
                 raise IndexError()
             
-            text_pos = text_pos_list[direction]
-            text_rect = text_rect_list[direction]
+        text_pos = text_pos_list[direction]
+        text_rect = text_rect_list[direction]
         
         self.text_rects.append(text_rect)
             
-        stop_name_svg = stop_name_main.replace('&', '&amp;')
+        stop_name_svg = escape_svg_text(stop_name_main)
         if stop_name_suffix:
-            stop_name_svg += '<tspan style="font-size:24px">{}</tspan>'.format(stop_name_suffix)
+            stop_name_svg += '<tspan style="font-size:24px">{}</tspan>'.format(escape_svg_text(stop_name_suffix))
         
         svg_text = ''
-        text_offset = 0
-        
+        depot_text_offset = 0
+
         # 기점 표시
         if stop['ord'] == 0:
             dir_len = math.sqrt(path_dir[0] ** 2 + path_dir[1] ** 2)
@@ -523,13 +570,20 @@ class RouteMap():
             dir_deg = math.acos(dir_cos) / math.pi * 180
             if path_dir[1] < 0:
                 dir_deg = 360 - dir_deg
-                
-            svg_text += svg_depot_icon.format(dir_deg, self.line_color) + '\n'
-            text_offset = 40
-        
-        svg_text += '<rect style="fill:{};fill-opacity:1;stroke:none;" width="{:.2f}" height="36" x="{:.2f}" y="0" ry="18" />'.format(self.line_color if section == 0 else self.line_dark_color, text_width, text_offset)
-        svg_text += '<text style="{}" text-anchor="middle" x="{:.2f}" y="28">{}</text>\n'.format(style_text + (style_fill_gray if stop['pass'] else style_fill_white), text_width / 2 + text_offset, stop_name_svg)
-        
+            
+            depot_offset = 0
+            depot_text_offset = 40
+            if direction == 2:
+                depot_offset = text_width + 4
+                depot_text_offset = 0
+
+            svg_text += '<g id="bus_depot_icon" transform="translate({:.2f}, 0)">'.format(depot_offset)
+            svg_text += svg_depot_icon.format(dir_deg, self.line_color)
+            svg_text += '</g>\n'
+
+        svg_text += '<rect style="fill:{};fill-opacity:1;stroke:none;" width="{:.2f}" height="36" x="{:.2f}" y="0" ry="18" />'.format(self.line_color if section == 0 else self.line_dark_color, text_width, depot_text_offset)
+        svg_text += '<text style="{}" text-anchor="middle" x="{:.2f}" y="28">{}</text>\n'.format(style_text + (style_fill_gray if stop['pass'] else style_fill_white), text_width / 2 + depot_text_offset, stop_name_svg)
+
         svg_text = '<g id="stop{3}" transform="translate({0:.2f}, {1:.2f}) scale({2:.2f}, {2:.2f})">'.format(text_pos[0], text_pos[1], text_size_factor, stop['ord']) + svg_text + '</g>'
         
         self.mapframe.update_rect(text_rect)

@@ -1,16 +1,35 @@
 import os, sys, json, requests, threading, shutil
-from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QAbstractItemView, QPushButton, QGroupBox, QRadioButton, QSpacerItem, QCheckBox, QProgressBar, QMessageBox, QGridLayout, QSlider, QDialog
+from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QHBoxLayout, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QAbstractItemView, QPushButton, QGroupBox, QRadioButton, QSpacerItem, QCheckBox, QProgressBar, QMessageBox, QGridLayout, QSlider, QDialog, QComboBox
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtCore import QByteArray, Qt, QBasicTimer, QObject, QEventLoop, Signal, Slot, QThread
 from PySide6.QtGui import QIcon, QTextDocument, QTextOption, QIntValidator
 import bus_api, routemap, mapbox
 
-version = '1.1'
+version = '1.2'
 
 def resource_path(relative_path):
     base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_path, relative_path)
+    return os.path.join(base_path, relative_path).replace('\\', '/')
+
+class RoundedComboBox(QComboBox):
+    def __init__(self):
+        super().__init__()
+
+        self.setStyleSheet("\
+            QComboBox { border: 1px solid rgba(0, 0, 0, 10%); background-color: #fff; border-radius: 4px; padding: 4px; outline: 0px; min-width: 15px } \
+            QComboBox::drop-down { border: 0px } \
+            QComboBox::down-arrow { image: url(" + resource_path("resources/down-arrow.svg") + "); width: 8px; } \
+            QComboBox:on { border-bottom-left-radius: 0px; border-bottom-right-radius: 0px; background-color: #fff; } \
+            QComboBox:hover { background-color: #eee } \
+            QComboBox QListView { border: 1px solid rgba(0, 0, 0, 10%); background-color: #fff; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; padding: 3px; outline: 0px } \
+            QComboBox QListView::item { padding: 3px 0px } \
+            QComboBox QListView::item:hover { border-radius: 4px; color: #000; background-color: #eee } \
+            QComboBox QListView::item:selected { border-radius: 4px; color: #000; background-color: #eee } \
+        ")
+
+        self.view().window().setWindowFlags(self.view().window().windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
+        self.view().window().setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
 class BusInfoThread(QObject):
     thread_finished = Signal(str)
@@ -149,14 +168,12 @@ class BusInfoEditWindow(QWidget):
     def __init__(self, parent):
         super().__init__()
         
-        self.window = parent
+        self.parent_window = parent
         
         self.setWindowTitle(" ")
         
         icon = QIcon(resource_path("resources/icon.ico"))
         self.setWindowIcon(icon)
-        
-        self.setFixedSize(240, 120)
         
         bus_info_layout = QGridLayout()
         
@@ -164,9 +181,9 @@ class BusInfoEditWindow(QWidget):
         self.start_input = QLineEdit()
         self.end_input = QLineEdit()
         
-        self.name_input.setText(self.window.route_info['name'])
-        self.start_input.setText(self.window.route_info['start'])
-        self.end_input.setText(self.window.route_info['end'])
+        self.name_input.setText(self.parent_window.route_info['name'])
+        self.start_input.setText(self.parent_window.route_info['start'])
+        self.end_input.setText(self.parent_window.route_info['end'])
         
         self.name_input.returnPressed.connect(self.ok)
         self.start_input.returnPressed.connect(self.ok)
@@ -193,27 +210,28 @@ class BusInfoEditWindow(QWidget):
         layout.addLayout(apply_layout)
         
         self.setLayout(layout)
+        self.setFixedSize(250, self.minimumSizeHint().height())
     
     def ok(self):
-        self.window.route_info['name'] = self.name_input.text()
-        self.window.route_info['start'] = self.start_input.text()
-        self.window.route_info['end'] = self.end_input.text()
+        self.parent_window.route_info['name'] = self.name_input.text()
+        self.parent_window.route_info['start'] = self.start_input.text()
+        self.parent_window.route_info['end'] = self.end_input.text()
         
-        self.window.refresh_preview()
+        self.parent_window.refresh_preview()
         self.close()
 
 class BusStopEditWindow(QWidget):
     def __init__(self, parent):
         super().__init__()
         
-        self.window = parent
+        self.parent_window = parent
         
         self.setWindowTitle("정류장 목록 편집")
         
         icon = QIcon(resource_path("resources/icon.ico"))
         self.setWindowIcon(icon)
         
-        self.setFixedSize(640, 400)
+        self.setMinimumSize(640, 400)
 
         self.bus_stop_table = QTableWidget()
         self.bus_stop_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -228,14 +246,19 @@ class BusStopEditWindow(QWidget):
         self.bus_stop_table.setColumnWidth(2, 150)
         self.bus_stop_table.setColumnWidth(3, 45)
         self.bus_stop_table.setColumnWidth(4, 45)
-        self.bus_stop_table.setColumnWidth(5, 45)
+        self.bus_stop_table.setColumnWidth(5, 70)
         self.bus_stop_table.setColumnWidth(6, 20)
         
         self.checkbox_list = []
+        self.text_direction_combobox_list = []
         
-        for i in range(len(parent.bus_stops)):
+        for _ in range(len(parent.bus_stops)):
             checkbox = QCheckBox()
             self.checkbox_list.append(checkbox)
+
+            combobox = RoundedComboBox()
+            combobox.addItems(['자동', '위쪽', '아래쪽', '왼쪽', '오른쪽'])
+            self.text_direction_combobox_list.append(combobox)
             
         self.load_table()
         self.bus_stop_table.itemChanged.connect(self.validate_table)
@@ -258,10 +281,10 @@ class BusStopEditWindow(QWidget):
         self.setLayout(layout)
     
     def load_table(self):
-        trans_id = self.window.trans_id
-        self.bus_stop_table.setRowCount(len(self.window.bus_stops))
+        trans_id = self.parent_window.trans_id
+        self.bus_stop_table.setRowCount(len(self.parent_window.bus_stops))
         
-        for i, stop in enumerate(self.window.bus_stops):
+        for i, stop in enumerate(self.parent_window.bus_stops):
             item_arsid = QTableWidgetItem(stop['arsid'])
             item_name = QTableWidgetItem(stop['name'])
             item_displayname = QTableWidgetItem('')
@@ -269,8 +292,6 @@ class BusStopEditWindow(QWidget):
             
             pass_stop = bool(routemap.rx_pass_stop.search(stop['name']))
             item_pass = QTableWidgetItem('경유' if pass_stop else '정차')
-            
-            item_text_direction = QTableWidgetItem('-1')
             
             item_arsid.setFlags(item_section.flags() & ~Qt.ItemIsEditable)
             item_name.setFlags(item_section.flags() & ~Qt.ItemIsEditable)
@@ -281,9 +302,8 @@ class BusStopEditWindow(QWidget):
             self.bus_stop_table.setItem(i, 2, item_displayname)
             self.bus_stop_table.setItem(i, 3, item_section)
             self.bus_stop_table.setItem(i, 4, item_pass)
-            self.bus_stop_table.setItem(i, 5, item_text_direction)
             
-        for i in range(len(self.window.bus_stops)):
+        for i in range(len(self.parent_window.bus_stops)):
             cell_widget = QWidget()
             layout_checkbox = QHBoxLayout(cell_widget)
             layout_checkbox.addWidget(self.checkbox_list[i])
@@ -292,8 +312,9 @@ class BusStopEditWindow(QWidget):
             cell_widget.setLayout(layout_checkbox)
             
             self.bus_stop_table.setCellWidget(i, 6, cell_widget)
+            self.bus_stop_table.setCellWidget(i, 5, self.text_direction_combobox_list[i])
         
-        for stop in self.window.render_bus_stop_list:
+        for stop in self.parent_window.render_bus_stop_list:
             self.checkbox_list[stop['ord']].setChecked(True)
             section = str(stop['section'])
             
@@ -301,25 +322,20 @@ class BusStopEditWindow(QWidget):
             self.bus_stop_table.item(stop['ord'], 3).setText(section)
             
             if 'text_dir' in stop:
-                self.bus_stop_table.item(stop['ord'], 5).setText(str(stop['text_dir']))
+                self.text_direction_combobox_list[stop['ord']].setCurrentIndex(stop['text_dir'] + 1)
             
-        self.initial_sections = [self.bus_stop_table.item(i, 3).text() for i in range(len(self.window.bus_stops))]
+        self.initial_sections = [self.bus_stop_table.item(i, 3).text() for i in range(len(self.parent_window.bus_stops))]
     
     def validate_table(self, item):
         if item.column() == 3:
             if item.text() != '0' and item.text() != '1':
                 item.setText(self.initial_sections[item.row()])
-        elif item.column() == 5:
-            try:
-                int(item.text())
-            except ValueError:
-                item.setText('-1')
     
     def apply(self):
         bus_stop_list = []
         new_trans_id = 0
         
-        for i in range(len(self.window.bus_stops)):
+        for i in range(len(self.parent_window.bus_stops)):
             try:
                 section = int(self.bus_stop_table.item(i, 3).text())
             except ValueError:
@@ -329,25 +345,21 @@ class BusStopEditWindow(QWidget):
                 name = self.bus_stop_table.item(i, 1).text()
                 display_name = self.bus_stop_table.item(i, 2).text()
                 pass_stop = bool(self.bus_stop_table.item(i, 4).text() == '경유')
-                try:
-                    text_dir = int(self.bus_stop_table.item(i, 5).text())
-                except ValueError:
-                    text_dir = -1
-                
+                text_dir = self.text_direction_combobox_list[i].currentIndex() - 1
                 if display_name:
                     name = display_name
                 
-                pos = routemap.convert_pos(self.window.bus_stops[i]['pos'])
+                pos = routemap.convert_pos(self.parent_window.bus_stops[i]['pos'])
                 bus_stop_list.append({'ord': i, 'pos': pos, 'name': name, 'section': section, 'pass': pass_stop, 'text_dir': text_dir})
             
             if section == 1 and new_trans_id == 0:
                 new_trans_id = i - 1
         
-        self.window.render_bus_stop_list = bus_stop_list
-        self.window.trans_id = new_trans_id
+        self.parent_window.render_bus_stop_list = bus_stop_list
+        self.parent_window.trans_id = new_trans_id
         
         self.load_table()
-        self.window.refresh_preview()
+        self.parent_window.refresh_preview()
     
     def ok(self):
         self.apply()
