@@ -257,10 +257,14 @@ def get_bus_color(route_info):
         # 공항리무진
         line_color = '#aa9872'
         line_dark_color = '#81704e'
-    elif route_info['type'] == 2 or route_info['type'] == 4 or route_info['type'] == 30:
+    elif route_info['type'] == 2 or route_info['type'] == 4:
         # 서울 지선
         line_color = '#5bb025'
         line_dark_color = '#44831c'
+    elif route_info['type'] == 5:
+        # 서울 순환
+        line_color = '#f99d1c'
+        line_dark_color = '#b46c0f'
     elif route_info['type'] == 6 or route_info['type'] == 11 or route_info['type'] == 21:
         if route_info['name'][0] == 'P':
             # 경기 프리미엄
@@ -278,6 +282,10 @@ def get_bus_color(route_info):
         # 경기 일반
         line_color = '#248f6c'
         line_dark_color = '#19654b'
+    elif route_info['type'] == 30:
+        # 경기 마을
+        line_color = '#f2a900'
+        line_dark_color = '#b57c00'
     elif route_info['type'] == 14:
         # 광역급행버스
         line_color = '#00aad4'

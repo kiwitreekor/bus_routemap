@@ -559,9 +559,9 @@ def get_naver_map(mapframe, naver_key_id, naver_key):
 
 def get_mapbox_map(mapframe, mapbox_key, mapbox_style):
     route_size_max = max(mapframe.size())
-    level = 12
+    level = 11
     
-    while 2 ** (21 - level) > route_size_max and level < 14:
+    while 2 ** (22 - level) > route_size_max and level < 14:
         level += 1
     
     tile_size = 2 ** (21 - level)

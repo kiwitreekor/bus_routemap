@@ -184,7 +184,16 @@ class BusInfoEditWindow(QWidget):
         self.name_input.setText(self.parent_window.route_info['name'])
         self.start_input.setText(self.parent_window.route_info['start'])
         self.end_input.setText(self.parent_window.route_info['end'])
-        
+
+        self.route_types = ['서울 간선', '서울 지선/서울 마을', '서울 광역/경기 직행좌석', '서울 순환', '경기 좌석', '경기 일반', '경기 마을', '광역급행버스', '부산 일반', '부산 급행', '부산 심야', '부산 마을', '공항리무진/경기 프리미엄']
+        self.route_type_ids = [3, 2, 6, 5, 12, 13, 30, 14, 61, 62, 64, 65, 1]
+        self.route_type_input = RoundedComboBox()
+        self.route_type_input.addItems(self.route_types)
+
+        if self.parent_window.route_info['type'] not in self.route_type_ids:
+            self.parent_window.route_info['type'] = 3
+        self.route_type_input.setCurrentIndex(self.route_type_ids.index(self.parent_window.route_info['type']))
+
         self.name_input.returnPressed.connect(self.ok)
         self.start_input.returnPressed.connect(self.ok)
         self.end_input.returnPressed.connect(self.ok)
@@ -196,7 +205,10 @@ class BusInfoEditWindow(QWidget):
         bus_info_layout.addWidget(self.start_input, 1, 1)
         bus_info_layout.addWidget(QLabel("종점: "), 2, 0)
         bus_info_layout.addWidget(self.end_input, 2, 1)
-        
+
+        bus_info_layout.addWidget(QLabel("종류: "), 3, 0)
+        bus_info_layout.addWidget(self.route_type_input, 3, 1)
+
         self.button_ok = QPushButton("확인")
         self.button_ok.clicked.connect(self.ok)
         
@@ -216,7 +228,8 @@ class BusInfoEditWindow(QWidget):
         self.parent_window.route_info['name'] = self.name_input.text()
         self.parent_window.route_info['start'] = self.start_input.text()
         self.parent_window.route_info['end'] = self.end_input.text()
-        
+        self.parent_window.route_info['type'] = self.route_type_ids[self.route_type_input.currentIndex()]
+
         self.parent_window.refresh_preview()
         self.close()
 
@@ -375,7 +388,7 @@ class SizeSlider(QWidget):
         self.slider.setRange(50, 200)
         self.slider.setValue(100)
         self.slider.valueChanged.connect(self.update_label)
-        self.slider.sliderReleased.connect(self.emit_value_changed)
+        self.slider.valueChanged.connect(self.emit_value_changed)
         
         self.label = QLabel(str(self.slider.value()) + '%')
         self.label.setFixedWidth(40)
@@ -417,7 +430,7 @@ class RenderThread(QThread):
         elif route_size[1] < route_size[0] / 1.5:
             route_size = (route_size[0], route_size[0] / 1.5)
         
-        size_factor_base = route_size[0] / 640
+        size_factor_base = max(route_size[0] / 640, route_size[0] / 1280 + 0.2)
         route_size_factor = size_factor_base * (parent.size_slider.value() / 100)
         info_size_factor = size_factor_base * (parent.info_size_slider.value() / 100) * 0.75
         circle_size_factor = size_factor_base * (parent.circle_size_slider.value() / 100)
