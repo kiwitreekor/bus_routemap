@@ -443,8 +443,13 @@ def search_busan_bus_info(key, number):
             for i in xml_bus_list:
                 name = i.find('./buslinenum').text
                 route_id = i.find('./lineid').text
-                start = i.find('./startpoint').text
-                end = i.find('./endpoint').text
+
+                start_elem = i.find('./startpoint')
+                start = start_elem.text if start_elem is not None else ''
+
+                end_elem = i.find('./endpoint')
+                end = end_elem.text if end_elem is not None else ''
+
                 route_type = convert_busan_bus_type(i.find('./bustype').text)
                 
                 bus_info_list.append({'name': name, 'id': route_id, 'desc': start + '~' + end, 'type': route_type})
