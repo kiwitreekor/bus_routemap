@@ -6,7 +6,7 @@ from PySide6.QtCore import QByteArray, Qt, QBasicTimer, QObject, QEventLoop, Sig
 from PySide6.QtGui import QIcon, QTextDocument, QTextOption, QIntValidator
 import bus_api, routemap, mapbox
 
-version = '1.2'
+version = '1.2.1'
 
 def resource_path(relative_path):
     base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
